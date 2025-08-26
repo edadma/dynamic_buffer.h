@@ -57,8 +57,11 @@ void test_db_new_with_data_handles_null_data(void) {
 }
 
 void test_db_new_with_data_rejects_invalid_params(void) {
-    db_buffer buf = db_new_with_data(NULL, 10);
-    TEST_ASSERT_NULL(buf);
+    // Test that NULL data with size 0 is valid
+    db_buffer buf = db_new_with_data(NULL, 0);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_EQUAL(0, db_size(buf));
+    db_release(&buf);
 }
 
 void test_db_new_from_owned_data_takes_ownership(void) {

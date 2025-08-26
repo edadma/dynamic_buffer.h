@@ -453,8 +453,13 @@ struct db_buffer_header {
 static db_buffer db_internal_create(size_t capacity) {
     // Allocate space for header + data
     size_t total_size = sizeof(struct db_buffer_header) + capacity;
+    
+    // Check for overflow
+    DB_ASSERT(total_size >= sizeof(struct db_buffer_header)); // Detect overflow
+    DB_ASSERT(total_size >= capacity); // Detect overflow
+    
     void* raw_memory = DB_MALLOC(total_size);
-    if (!raw_memory) return NULL;
+    DB_ASSERT(raw_memory); // Malloc failure is a serious system error
     
     // Set up header at the beginning
     struct db_buffer_header* header = (struct db_buffer_header*)raw_memory;
@@ -486,10 +491,9 @@ DB_DEF db_buffer db_new(size_t capacity) {
 }
 
 DB_DEF db_buffer db_new_with_data(const void* data, size_t size) {
-    if (size > 0 && !data) return NULL;
+    DB_ASSERT(data || size == 0); // Programming error: can't copy from NULL pointer
     
     db_buffer buf = db_internal_create(size);
-    if (!buf) return NULL;
     
     if (size > 0) {
         memcpy(buf, data, size);
@@ -506,7 +510,6 @@ DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity
     // We can't use the negative offset trick here since we don't control the data allocation
     // Instead, we'll copy the data to maintain design consistency
     db_buffer buf = db_internal_create(capacity);
-    if (!buf) return NULL;
     
     if (size > 0) {
         memcpy(buf, data, size);
@@ -526,7 +529,8 @@ DB_DEF db_buffer db_retain(db_buffer buf) {
 }
 
 DB_DEF void db_release(db_buffer* buf_ptr) {
-    if (!buf_ptr || !*buf_ptr) return;
+    DB_ASSERT(buf_ptr); // buf_ptr must not be NULL - this is a programming error
+    if (!*buf_ptr) return; // Allow releasing NULL buffer
     
     db_buffer buf = *buf_ptr;
     *buf_ptr = NULL;
@@ -566,7 +570,6 @@ DB_DEF db_buffer db_slice(db_buffer buf, size_t offset, size_t length) {
     
     // Copy the slice data to maintain the negative-offset pattern for all buffers
     db_buffer slice = db_internal_create(length);
-    if (!slice) return NULL;
     
     // Copy the slice data directly from the source buffer
     if (length > 0) {
@@ -694,7 +697,6 @@ DB_DEF db_buffer db_concat(db_buffer buf1, db_buffer buf2) {
     if (total_size == 0) return db_new(0);
     
     db_buffer result = db_new(total_size);
-    if (!result) return NULL;
     
     if (size1 > 0) {
         memcpy(result, buf1, size1);
@@ -721,7 +723,6 @@ DB_DEF db_buffer db_concat_many(db_buffer* buffers, size_t count) {
     }
     
     db_buffer result = db_new(total_size);
-    if (!result) return NULL;
     
     size_t offset = 0;
     for (size_t i = 0; i < count; i++) {
@@ -780,7 +781,8 @@ DB_DEF int db_compare(db_buffer buf1, db_buffer buf2) {
 #endif
 
 DB_DEF ssize_t db_read_fd(db_buffer* buf_ptr, int fd, size_t max_bytes) {
-    DB_ASSERT(buf_ptr && *buf_ptr);
+    DB_ASSERT(buf_ptr && *buf_ptr); // Programming error - must provide valid buffer pointer
+    DB_ASSERT(fd >= 0); // Programming error - invalid file descriptor
     db_buffer buf = *buf_ptr;
     
     // Cannot modify shared buffers
@@ -807,7 +809,8 @@ DB_DEF ssize_t db_read_fd(db_buffer* buf_ptr, int fd, size_t max_bytes) {
 }
 
 DB_DEF ssize_t db_write_fd(db_buffer buf, int fd) {
-    DB_ASSERT(buf);
+    DB_ASSERT(buf); // Programming error - buffer must not be NULL
+    DB_ASSERT(fd >= 0); // Programming error - invalid file descriptor  
     size_t size = DB_HEADER(buf)->size;
     if (size == 0) return 0;
     
@@ -815,7 +818,7 @@ DB_DEF ssize_t db_write_fd(db_buffer buf, int fd) {
 }
 
 DB_DEF db_buffer db_read_file(const char* filename) {
-    if (!filename) return NULL;
+    if (!filename) return NULL; // Allow NULL filename as runtime error
     
     FILE* file = fopen(filename, "rb");
     if (!file) return NULL;
@@ -844,8 +847,8 @@ DB_DEF db_buffer db_read_file(const char* filename) {
 }
 
 DB_DEF bool db_write_file(db_buffer buf, const char* filename) {
-    DB_ASSERT(buf);
-    if (!filename) return false;
+    DB_ASSERT(buf); // Programming error - buffer must not be NULL
+    if (!filename) return false; // Allow NULL filename as runtime error
     
     FILE* file = fopen(filename, "wb");
     if (!file) return false;
@@ -870,7 +873,6 @@ DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase) {
     
     size_t hex_size = size * 2;
     db_buffer hex_buf = db_new(hex_size);
-    if (!hex_buf) return NULL;
     
     const char* hex_chars = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
     const uint8_t* data = (const uint8_t*)buf;
@@ -893,11 +895,10 @@ static int hex_char_to_value(char c) {
 }
 
 DB_DEF db_buffer db_from_hex(const char* hex_string, size_t length) {
-    if (!hex_string || length % 2 != 0) return NULL;
+    if (!hex_string || length % 2 != 0) return NULL; // Runtime validation
     
     size_t byte_length = length / 2;
     db_buffer buf = db_new(byte_length);
-    if (!buf) return NULL;
     
     uint8_t* data = (uint8_t*)buf;
     
