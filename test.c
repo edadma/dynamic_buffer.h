@@ -381,14 +381,14 @@ void test_large_buffer_operations(void) {
 
 void test_builder_basic_operations(void) {
     db_builder builder = db_builder_new(64);
-    TEST_ASSERT_NOT_NULL(builder.data);
-    TEST_ASSERT_EQUAL(64, db_builder_capacity(&builder));
+    TEST_ASSERT_NOT_NULL(builder);
+    TEST_ASSERT_EQUAL(64, db_builder_capacity(builder));
     
-    TEST_ASSERT_EQUAL(0, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_size(builder));
     
     db_buffer buf = db_builder_finish(&builder);
     TEST_ASSERT_NOT_NULL(buf);
-    TEST_ASSERT_NULL(builder.data);  // Should be set to NULL after finish
+    TEST_ASSERT_NULL(builder);  // Should be set to NULL after finish
     
     TEST_ASSERT_EQUAL(0, db_size(buf));
     
@@ -398,12 +398,12 @@ void test_builder_basic_operations(void) {
 void test_builder_write_primitives(void) {
     db_builder builder = db_builder_new(64);
     
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(&builder, 0x42));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(&builder, 0x12345678));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_le(&builder, 0x123456789ABCDEF0ULL));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(builder, 0x42));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(builder, 0x12345678));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_le(builder, 0x123456789ABCDEF0ULL));
     
-    TEST_ASSERT_EQUAL(1 + 2 + 4 + 8, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(1 + 2 + 4 + 8, db_builder_size(builder));
     
     db_buffer buf = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(15, db_size(buf));
@@ -420,8 +420,8 @@ void test_builder_write_endianness(void) {
     db_builder builder = db_builder_new(64);
     
     // Write same value in both endiannesses
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_be(&builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_be(builder, 0x1234));
     
     db_buffer buf = db_builder_finish(&builder);
     const uint8_t* data = (const uint8_t*)buf;
@@ -441,9 +441,9 @@ void test_builder_from_buffer(void) {
     db_buffer buf = db_new_with_data("Hello", 5);
     
     db_builder builder = db_builder_from_buffer(buf);
-    TEST_ASSERT_EQUAL(5, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(5, db_builder_size(builder));
     
-    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, " World"));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder, " World"));
     
     db_buffer result = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(11, db_size(result));
@@ -456,14 +456,14 @@ void test_builder_from_buffer(void) {
 void test_builder_clear_operations(void) {
     db_builder builder = db_builder_new(64);
     
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(&builder, 0x12345678));
-    TEST_ASSERT_EQUAL(4, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(builder, 0x12345678));
+    TEST_ASSERT_EQUAL(4, db_builder_size(builder));
     
-    db_builder_clear(&builder);
-    TEST_ASSERT_EQUAL(0, db_builder_size(&builder));
+    db_builder_clear(builder);
+    TEST_ASSERT_EQUAL(0, db_builder_size(builder));
     
-    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, "Test"));
-    TEST_ASSERT_EQUAL(4, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder, "Test"));
+    TEST_ASSERT_EQUAL(4, db_builder_size(builder));
     
     db_buffer buf = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL_MEMORY("Test", buf, 4);
@@ -484,7 +484,7 @@ void test_reader_basic_operations(void) {
     TEST_ASSERT_TRUE(db_reader_can_read(reader, 5));
     TEST_ASSERT_FALSE(db_reader_can_read(reader, 6));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     TEST_ASSERT_NULL(reader);  // Should be set to NULL
     
     db_release(&buf);
@@ -509,7 +509,7 @@ void test_reader_read_primitives(void) {
     TEST_ASSERT_EQUAL(sizeof(test_data), db_reader_position(reader));
     TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -525,7 +525,7 @@ void test_reader_read_endianness(void) {
     TEST_ASSERT_EQUAL(0x1234, db_read_uint16_le(reader));
     TEST_ASSERT_EQUAL(0x1234, db_read_uint16_be(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -545,7 +545,7 @@ void test_reader_bounds_checking(void) {
     TEST_ASSERT_FALSE(db_reader_can_read(reader, 1));
     TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -562,17 +562,17 @@ void test_reader_seek_operations(void) {
     db_reader_seek(reader, 0);  // Seek back to start
     TEST_ASSERT_EQUAL(0x10, db_read_uint8(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
 void test_builder_reader_roundtrip(void) {
     // Build a complex buffer
     db_builder builder = db_builder_new(64);
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(&builder, 0x42));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_be(&builder, 0x12345678));
-    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, "Test"));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(builder, 0x42));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_be(builder, 0x12345678));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder, "Test"));
     
     db_buffer buf = db_builder_finish(&builder);
     
@@ -589,7 +589,7 @@ void test_builder_reader_roundtrip(void) {
     
     TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -628,17 +628,17 @@ void test_builder_append_functions(void) {
     db_builder builder = db_builder_new(64);
     
     // Test db_builder_append with raw data
-    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, "Hello", 5));
-    TEST_ASSERT_EQUAL(5, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append(builder, "Hello", 5));
+    TEST_ASSERT_EQUAL(5, db_builder_size(builder));
     
     // Test db_builder_append_cstring  
-    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, " World"));
-    TEST_ASSERT_EQUAL(11, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder, " World"));
+    TEST_ASSERT_EQUAL(11, db_builder_size(builder));
     
     // Test db_builder_append_buffer
     db_buffer extra = db_new_with_data("!", 1);
-    TEST_ASSERT_EQUAL(0, db_builder_append_buffer(&builder, extra));
-    TEST_ASSERT_EQUAL(12, db_builder_size(&builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append_buffer(builder, extra));
+    TEST_ASSERT_EQUAL(12, db_builder_size(builder));
     
     db_buffer result = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(12, db_size(result));
@@ -652,10 +652,10 @@ void test_builder_append_functions(void) {
 void test_reader_missing_functions(void) {
     // Create buffer with big-endian uint64
     db_builder builder = db_builder_new(32);
-    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_be(&builder, 0x123456789ABCDEF0ULL));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_be(builder, 0x123456789ABCDEF0ULL));
     
     // Add some bytes for db_read_bytes test
-    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, "TestData", 8));
+    TEST_ASSERT_EQUAL(0, db_builder_append(builder, "TestData", 8));
     
     db_buffer buf = db_builder_finish(&builder);
     db_reader reader = db_reader_new(buf);
@@ -668,7 +668,7 @@ void test_reader_missing_functions(void) {
     db_read_bytes(reader, data, 8);
     TEST_ASSERT_EQUAL_STRING("TestData", data);
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -682,6 +682,110 @@ void test_null_parameter_handling(void) {
     db_buffer buf = db_new_with_data(NULL, 0);
     TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_TRUE(db_is_empty(buf));
+    db_release(&buf);
+}
+
+// Builder reference counting tests
+void test_builder_reference_counting(void) {
+    db_builder builder1 = db_builder_new(64);
+    TEST_ASSERT_NOT_NULL(builder1);
+    
+    // Test retain
+    db_builder builder2 = db_builder_retain(builder1);
+    TEST_ASSERT_EQUAL(builder1, builder2);  // Should be same pointer
+    
+    // Test retain with NULL - would cause assertion failure, so skip this test
+    // db_builder null_builder = db_builder_retain(NULL);
+    
+    // Append some data to verify builder still works
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder1, "Hello"));
+    TEST_ASSERT_EQUAL(5, db_builder_size(builder1));
+    TEST_ASSERT_EQUAL(5, db_builder_size(builder2));  // Same underlying data
+    
+    // Release one reference
+    db_builder_release(&builder1);
+    TEST_ASSERT_NULL(builder1);
+    
+    // Other reference should still work
+    TEST_ASSERT_EQUAL(5, db_builder_size(builder2));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(builder2, " World"));
+    TEST_ASSERT_EQUAL(11, db_builder_size(builder2));
+    
+    // Finish and verify
+    db_buffer buf = db_builder_finish(&builder2);
+    TEST_ASSERT_NULL(builder2);
+    TEST_ASSERT_EQUAL(11, db_size(buf));
+    TEST_ASSERT_EQUAL_MEMORY("Hello World", buf, 11);
+    
+    db_release(&buf);
+}
+
+void test_builder_release_null_handling(void) {
+    // Test release with NULL builder
+    db_builder null_builder = NULL;
+    db_builder_release(&null_builder);  // Should handle gracefully (only case that doesn't assert)
+    TEST_ASSERT_NULL(null_builder);
+    
+    // Note: db_builder_release(NULL) would cause assertion failure
+}
+
+// Reader reference counting tests
+void test_reader_reference_counting(void) {
+    db_buffer buf = db_new_with_data("Test data", 9);
+    
+    db_reader reader1 = db_reader_new(buf);
+    TEST_ASSERT_NOT_NULL(reader1);
+    
+    // Test retain
+    db_reader reader2 = db_reader_retain(reader1);
+    TEST_ASSERT_EQUAL(reader1, reader2);  // Should be same pointer
+    
+    // Test retain with NULL - would cause assertion failure, so skip this test
+    // db_reader null_reader = db_reader_retain(NULL);
+    
+    // Both readers should work on same data
+    TEST_ASSERT_EQUAL(0, db_reader_position(reader1));
+    TEST_ASSERT_EQUAL(0, db_reader_position(reader2));
+    TEST_ASSERT_EQUAL(9, db_reader_remaining(reader1));
+    TEST_ASSERT_EQUAL(9, db_reader_remaining(reader2));
+    
+    // Read from one reader
+    uint8_t byte = db_read_uint8(reader1);
+    TEST_ASSERT_EQUAL('T', byte);
+    TEST_ASSERT_EQUAL(1, db_reader_position(reader1));
+    TEST_ASSERT_EQUAL(1, db_reader_position(reader2));  // Same position
+    
+    // Release one reference
+    db_reader_release(&reader1);
+    TEST_ASSERT_NULL(reader1);
+    
+    // Other reference should still work
+    TEST_ASSERT_EQUAL(1, db_reader_position(reader2));
+    byte = db_read_uint8(reader2);
+    TEST_ASSERT_EQUAL('e', byte);
+    
+    // Clean up
+    db_reader_release(&reader2);
+    db_release(&buf);
+}
+
+void test_reader_release_null_handling(void) {
+    // Test release with NULL reader
+    db_reader null_reader = NULL;
+    db_reader_release(&null_reader);  // Should handle gracefully (only case that doesn't assert)
+    TEST_ASSERT_NULL(null_reader);
+    
+    // Note: db_reader_release(NULL) would cause assertion failure
+}
+
+void test_reader_free_legacy_compatibility(void) {
+    db_buffer buf = db_new_with_data("Test", 4);
+    db_reader reader = db_reader_new(buf);
+    
+    // Test that db_reader_free still works (legacy compatibility)
+    db_reader_free(&reader);
+    TEST_ASSERT_NULL(reader);
+    
     db_release(&buf);
 }
 
@@ -727,7 +831,7 @@ void test_reader_edge_cases(void) {
     db_reader_seek(reader, 4);  // Seek to end
     TEST_ASSERT_EQUAL(4, db_reader_position(reader));
     
-    db_reader_free(&reader);
+    db_reader_release(&reader);
     db_release(&buf);
 }
 
@@ -735,14 +839,14 @@ void test_reader_edge_cases(void) {
 void test_builder_capacity_growth(void) {
     db_builder builder = db_builder_new(8);  // Small initial capacity
     
-    TEST_ASSERT_EQUAL(8, db_builder_capacity(&builder));
+    TEST_ASSERT_EQUAL(8, db_builder_capacity(builder));
     
     // Fill beyond initial capacity to trigger growth
     const char* large_data = "This is much longer than 8 bytes and should trigger capacity growth";
-    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, large_data, strlen(large_data)));
+    TEST_ASSERT_EQUAL(0, db_builder_append(builder, large_data, strlen(large_data)));
     
-    TEST_ASSERT(db_builder_capacity(&builder) >= strlen(large_data));
-    TEST_ASSERT_EQUAL(strlen(large_data), db_builder_size(&builder));
+    TEST_ASSERT(db_builder_capacity(builder) >= strlen(large_data));
+    TEST_ASSERT_EQUAL(strlen(large_data), db_builder_size(builder));
     
     db_buffer result = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(strlen(large_data), db_size(result));
@@ -849,6 +953,10 @@ int main(void) {
     RUN_TEST(test_builder_append_functions);
     RUN_TEST(test_builder_capacity_growth);
     
+    // Builder reference counting tests
+    RUN_TEST(test_builder_reference_counting);
+    RUN_TEST(test_builder_release_null_handling);
+    
     // Reader API tests
     RUN_TEST(test_reader_basic_operations);
     RUN_TEST(test_reader_read_primitives);
@@ -857,6 +965,11 @@ int main(void) {
     RUN_TEST(test_reader_seek_operations);
     RUN_TEST(test_reader_missing_functions);
     RUN_TEST(test_reader_edge_cases);
+    
+    // Reader reference counting tests
+    RUN_TEST(test_reader_reference_counting);
+    RUN_TEST(test_reader_release_null_handling);
+    RUN_TEST(test_reader_free_legacy_compatibility);
     
     // Builder + Reader integration tests
     RUN_TEST(test_builder_reader_roundtrip);

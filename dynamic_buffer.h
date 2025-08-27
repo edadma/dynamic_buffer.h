@@ -36,23 +36,38 @@
  * db_buffer world = db_new_with_data(" World", 6);
  * db_buffer combined = db_concat(buf, world);
  * 
- * // Access the data
- * printf("Buffer: %.*s\n", (int)db_size(combined), combined);
+ * // Use a builder to construct data
+ * db_builder builder = db_builder_new(64);
+ * db_builder_append_cstring(builder, "Built: ");
+ * db_builder_append_uint32_le(builder, 0x12345678);
+ * db_buffer built = db_builder_finish(&builder);
  * 
- * // Clean up (reference counting handles memory)
+ * // Use a reader to parse data
+ * db_reader reader = db_reader_new(built);
+ * char prefix[8];
+ * db_read_bytes(reader, prefix, 7);
+ * prefix[7] = '\0';  // "Built: "
+ * uint32_t value = db_read_uint32_le(reader);  // 0x12345678
+ * 
+ * // Clean up (reference counting handles memory automatically)
  * db_release(&buf);
  * db_release(&slice);
  * db_release(&world);
  * db_release(&combined);
+ * db_release(&built);
+ * db_reader_release(&reader);
  * @endcode
  *
  * @section features Key Features
  *
- * - **Reference counting**: Automatic memory management with atomic support
+ * - **Reference counting**: Automatic memory management with atomic support for buffers, builders, and readers
  * - **Buffer slicing**: Create independent copies of buffer segments  
  * - **Efficient concatenation**: Optimized buffer joining operations
+ * - **Builder API**: Type-safe construction of binary data with reference counting
+ * - **Reader API**: Cursor-based parsing of binary data with reference counting  
  * - **I/O integration**: Compatible with read/write operations
  * - **Memory safety**: Bounds checking and safe access patterns
+ * - **Concurrent access**: Lock-free atomic reference counting for safe sharing
  * - **Microcontroller friendly**: Minimal memory overhead
  *
  * @section license License
@@ -66,9 +81,9 @@
 
 // Version information
 #define DB_VERSION_MAJOR 0
-#define DB_VERSION_MINOR 1
-#define DB_VERSION_PATCH 1
-#define DB_VERSION_STRING "0.1.1"
+#define DB_VERSION_MINOR 2
+#define DB_VERSION_PATCH 0
+#define DB_VERSION_STRING "0.2.0"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -436,12 +451,9 @@ DB_DEF void db_debug_print(db_buffer buf, const char* label);
  */
 
 /**
- * @brief Builder structure for constructing buffers efficiently
+ * @brief Opaque builder handle for constructing buffers efficiently
  */
-typedef struct {
-    db_buffer data;     // Points to buffer data (same layout as db_buffer)
-    size_t capacity;    // Capacity for growth (size is in metadata)
-} db_builder;
+typedef struct db_builder_internal* db_builder;
 
 /**
  * @brief Create a new buffer builder
@@ -451,10 +463,10 @@ typedef struct {
  * @par Example:
  * @code
  * db_builder builder = db_builder_new(64);
- * db_builder_append_uint16_le(&builder, 0x1234);
- * db_builder_append_cstring(&builder, "Hello");
+ * db_builder_append_uint16_le(builder, 0x1234);
+ * db_builder_append_cstring(builder, "Hello");
  * 
- * db_buffer buf = db_builder_finish(&builder);
+ * db_buffer buf = db_builder_finish(&builder);  // builder becomes NULL
  * printf("Built buffer with %zu bytes\n", db_size(buf));
  * db_release(&buf);
  * @endcode
@@ -469,6 +481,19 @@ DB_DEF db_builder db_builder_new(size_t initial_capacity);
 DB_DEF db_builder db_builder_from_buffer(db_buffer buf);
 
 /**
+ * @brief Increase builder reference count (share ownership)
+ * @param builder Builder to retain (must not be NULL)
+ * @return The same builder for convenience
+ */
+DB_DEF db_builder db_builder_retain(db_builder builder);
+
+/**
+ * @brief Decrease builder reference count and potentially free builder
+ * @param builder_ptr Pointer to builder variable (will be set to NULL)
+ */
+DB_DEF void db_builder_release(db_builder* builder_ptr);
+
+/**
  * @brief Finalize builder and return the constructed buffer
  * @param builder_ptr Pointer to builder (will be set to NULL)
  * @return Constructed buffer
@@ -480,93 +505,93 @@ DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr);
  * @param builder Builder instance
  * @return Current position in bytes
  */
-DB_DEF size_t db_builder_size(const db_builder* builder);
+DB_DEF size_t db_builder_size(db_builder builder);
 
 /**
  * @brief Get current capacity of builder
  * @param builder Builder instance  
  * @return Current capacity in bytes
  */
-DB_DEF size_t db_builder_capacity(const db_builder* builder);
+DB_DEF size_t db_builder_capacity(db_builder builder);
 
 /**
  * @brief Clear builder contents
  * @param builder Builder instance
  */
-DB_DEF void db_builder_clear(db_builder* builder);
+DB_DEF void db_builder_clear(db_builder builder);
 
 /**
  * @brief Write uint8 value
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint8(db_builder* builder, uint8_t value);
+DB_DEF int db_builder_append_uint8(db_builder builder, uint8_t value);
 
 /**
  * @brief Write uint16 value in little-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint16_le(db_builder* builder, uint16_t value);
+DB_DEF int db_builder_append_uint16_le(db_builder builder, uint16_t value);
 
 /**
  * @brief Write uint16 value in big-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint16_be(db_builder* builder, uint16_t value);
+DB_DEF int db_builder_append_uint16_be(db_builder builder, uint16_t value);
 
 /**
  * @brief Write uint32 value in little-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint32_le(db_builder* builder, uint32_t value);
+DB_DEF int db_builder_append_uint32_le(db_builder builder, uint32_t value);
 
 /**
  * @brief Write uint32 value in big-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint32_be(db_builder* builder, uint32_t value);
+DB_DEF int db_builder_append_uint32_be(db_builder builder, uint32_t value);
 
 /**
  * @brief Write uint64 value in little-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint64_le(db_builder* builder, uint64_t value);
+DB_DEF int db_builder_append_uint64_le(db_builder builder, uint64_t value);
 
 /**
  * @brief Write uint64 value in big-endian format
  * @param builder Builder instance
  * @param value Value to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_uint64_be(db_builder* builder, uint64_t value);
+DB_DEF int db_builder_append_uint64_be(db_builder builder, uint64_t value);
 
 /**
  * @brief Write raw bytes
  * @param builder Builder instance
  * @param data Data to write
  * @param size Number of bytes to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append(db_builder* builder, const void* data, size_t size);
+DB_DEF int db_builder_append(db_builder builder, const void* data, size_t size);
 
 /**
  * @brief Write null-terminated string (without null terminator)
  * @param builder Builder instance
  * @param str String to write
- * @return Same builder for chaining
+ * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_cstring(db_builder* builder, const char* str);
+DB_DEF int db_builder_append_cstring(db_builder builder, const char* str);
 
 /**
  * @brief Append buffer contents
@@ -574,7 +599,7 @@ DB_DEF int db_builder_append_cstring(db_builder* builder, const char* str);
  * @param buf Buffer to append
  * @return 0 on success, -1 on error
  */
-DB_DEF int db_builder_append_buffer(db_builder* builder, db_buffer buf);
+DB_DEF int db_builder_append_buffer(db_builder builder, db_buffer buf);
 
 /** @} */
 
@@ -600,13 +625,26 @@ typedef struct db_reader_internal* db_reader;
  * uint16_t value = db_read_uint16_le(reader);
  * char data[10];
  * db_read_bytes(reader, data, sizeof(data));
- * db_reader_free(&reader);
+ * db_reader_release(&reader);
  * @endcode
  */
 DB_DEF db_reader db_reader_new(db_buffer buf);
 
 /**
- * @brief Free reader resources
+ * @brief Increase reader reference count (share ownership)
+ * @param reader Reader to retain (must not be NULL)
+ * @return The same reader for convenience
+ */
+DB_DEF db_reader db_reader_retain(db_reader reader);
+
+/**
+ * @brief Decrease reader reference count and potentially free reader
+ * @param reader_ptr Pointer to reader variable (will be set to NULL)
+ */
+DB_DEF void db_reader_release(db_reader* reader_ptr);
+
+/**
+ * @brief Free reader resources (legacy name, use db_reader_release instead)
  * @param reader_ptr Pointer to reader (will be set to NULL)
  */
 DB_DEF void db_reader_free(db_reader* reader_ptr);
@@ -1264,60 +1302,94 @@ DB_DEF void db_debug_print(db_buffer buf, const char* label) {
 
 // Builder and Reader Implementation
 
-// Builder implementation - no internal struct needed, uses public struct
+struct db_builder_internal {
+    db_refcount_t refcount;  // Reference count for the builder itself
+    db_buffer data;          // Points to buffer data (same layout as db_buffer)
+    size_t capacity;         // Capacity for growth (size is in metadata)
+};
 
 struct db_reader_internal {
-    db_buffer buf;       // Buffer being read (retained reference)
-    size_t position;     // Current read position
+    db_refcount_t refcount;  // Reference count for the reader itself
+    db_buffer buf;           // Buffer being read (retained reference)
+    size_t position;         // Current read position
 };
 
 // Builder implementation
 
 DB_DEF db_builder db_builder_new(size_t initial_capacity) {
-    db_buffer buf = db_new(initial_capacity);
-    if (!buf) {
-        db_builder null_builder = {NULL, 0};
-        return null_builder;
-    }
+    struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
+    DB_ASSERT(builder && "db_builder_new: memory allocation failed");
     
-    db_builder builder = {buf, initial_capacity};
+    db_buffer buf = db_new(initial_capacity);
+    // db_new asserts on allocation failure
+    
+    builder->refcount = DB_REFCOUNT_INIT(1);
+    builder->data = buf;
+    builder->capacity = initial_capacity;
+    
     return builder;
 }
 
 DB_DEF db_builder db_builder_from_buffer(db_buffer buf) {
     DB_ASSERT(buf && "db_builder_from_buffer: buf cannot be NULL");
     
-    db_builder builder = {db_retain(buf), db_capacity(buf)};
+    struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
+    DB_ASSERT(builder && "db_builder_from_buffer: memory allocation failed");
+    
+    builder->refcount = DB_REFCOUNT_INIT(1);
+    builder->data = db_retain(buf);
+    builder->capacity = db_capacity(buf);
+    
     return builder;
+}
+
+DB_DEF db_builder db_builder_retain(db_builder builder) {
+    DB_ASSERT(builder && "db_builder_retain: builder cannot be NULL");
+    DB_REFCOUNT_INCREMENT(&builder->refcount);
+    return builder;
+}
+
+DB_DEF void db_builder_release(db_builder* builder_ptr) {
+    DB_ASSERT(builder_ptr && "db_builder_release: builder_ptr cannot be NULL");
+    if (!*builder_ptr) return;
+    
+    db_builder builder = *builder_ptr;
+    *builder_ptr = NULL;
+    
+    if (DB_REFCOUNT_DECREMENT(&builder->refcount) == 0) {
+        // Reference count reached 0, free the builder and release buffer
+        db_release(&builder->data);
+        DB_FREE(builder);
+    }
 }
 
 DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr) {
     DB_ASSERT(builder_ptr && "db_builder_finish: builder_ptr cannot be NULL");
-    DB_ASSERT(builder_ptr->data && "db_builder_finish: builder data cannot be NULL");
+    DB_ASSERT(*builder_ptr && "db_builder_finish: builder cannot be NULL");
     
-    db_buffer result = builder_ptr->data;
+    struct db_builder_internal* builder = *builder_ptr;
+    db_buffer result = builder->data;
     
-    // Invalidate the builder
-    builder_ptr->data = NULL;
-    builder_ptr->capacity = 0;
+    // Invalidate the builder - don't release the buffer, it's being returned
+    builder->data = NULL;
+    DB_FREE(builder);
+    *builder_ptr = NULL;
     
     return result;
 }
 
-DB_DEF size_t db_builder_size(const db_builder* builder) {
+DB_DEF size_t db_builder_size(db_builder builder) {
     DB_ASSERT(builder && "db_builder_size: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_size: builder data cannot be NULL");
     return db_size(builder->data);
 }
 
-DB_DEF size_t db_builder_capacity(const db_builder* builder) {
+DB_DEF size_t db_builder_capacity(db_builder builder) {
     DB_ASSERT(builder && "db_builder_capacity: builder cannot be NULL");
     return builder->capacity;
 }
 
-DB_DEF void db_builder_clear(db_builder* builder) {
+DB_DEF void db_builder_clear(db_builder builder) {
     DB_ASSERT(builder && "db_builder_clear: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_clear: builder data cannot be NULL");
     
     // Always create a new empty buffer (since buffers are immutable)
     db_release(&builder->data);
@@ -1326,16 +1398,14 @@ DB_DEF void db_builder_clear(db_builder* builder) {
 
 
 
-DB_DEF int db_builder_append_uint8(db_builder* builder, uint8_t value) {
+DB_DEF int db_builder_append_uint8(db_builder builder, uint8_t value) {
     DB_ASSERT(builder && "db_builder_append_uint8: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint8: builder data cannot be NULL");
     
     return db_internal_append(&builder->data, &builder->capacity, &value, 1);
 }
 
-DB_DEF int db_builder_append_uint16_le(db_builder* builder, uint16_t value) {
+DB_DEF int db_builder_append_uint16_le(db_builder builder, uint16_t value) {
     DB_ASSERT(builder && "db_builder_append_uint16_le: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint16_le: builder data cannot be NULL");
     
     uint8_t bytes[2] = {
         (uint8_t)(value & 0xFF),
@@ -1345,9 +1415,8 @@ DB_DEF int db_builder_append_uint16_le(db_builder* builder, uint16_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 2);
 }
 
-DB_DEF int db_builder_append_uint16_be(db_builder* builder, uint16_t value) {
+DB_DEF int db_builder_append_uint16_be(db_builder builder, uint16_t value) {
     DB_ASSERT(builder && "db_builder_append_uint16_be: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint16_be: builder data cannot be NULL");
     
     uint8_t bytes[2] = {
         (uint8_t)((value >> 8) & 0xFF),
@@ -1357,9 +1426,8 @@ DB_DEF int db_builder_append_uint16_be(db_builder* builder, uint16_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 2);
 }
 
-DB_DEF int db_builder_append_uint32_le(db_builder* builder, uint32_t value) {
+DB_DEF int db_builder_append_uint32_le(db_builder builder, uint32_t value) {
     DB_ASSERT(builder && "db_builder_append_uint32_le: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint32_le: builder data cannot be NULL");
     
     uint8_t bytes[4] = {
         (uint8_t)(value & 0xFF),
@@ -1371,9 +1439,8 @@ DB_DEF int db_builder_append_uint32_le(db_builder* builder, uint32_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 4);
 }
 
-DB_DEF int db_builder_append_uint32_be(db_builder* builder, uint32_t value) {
+DB_DEF int db_builder_append_uint32_be(db_builder builder, uint32_t value) {
     DB_ASSERT(builder && "db_builder_append_uint32_be: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint32_be: builder data cannot be NULL");
     
     uint8_t bytes[4] = {
         (uint8_t)((value >> 24) & 0xFF),
@@ -1385,9 +1452,8 @@ DB_DEF int db_builder_append_uint32_be(db_builder* builder, uint32_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 4);
 }
 
-DB_DEF int db_builder_append_uint64_le(db_builder* builder, uint64_t value) {
+DB_DEF int db_builder_append_uint64_le(db_builder builder, uint64_t value) {
     DB_ASSERT(builder && "db_builder_append_uint64_le: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint64_le: builder data cannot be NULL");
     
     uint8_t bytes[8] = {
         (uint8_t)(value & 0xFF),
@@ -1403,9 +1469,8 @@ DB_DEF int db_builder_append_uint64_le(db_builder* builder, uint64_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 8);
 }
 
-DB_DEF int db_builder_append_uint64_be(db_builder* builder, uint64_t value) {
+DB_DEF int db_builder_append_uint64_be(db_builder builder, uint64_t value) {
     DB_ASSERT(builder && "db_builder_append_uint64_be: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append_uint64_be: builder data cannot be NULL");
     
     uint8_t bytes[8] = {
         (uint8_t)((value >> 56) & 0xFF),
@@ -1421,9 +1486,8 @@ DB_DEF int db_builder_append_uint64_be(db_builder* builder, uint64_t value) {
     return db_internal_append(&builder->data, &builder->capacity, bytes, 8);
 }
 
-DB_DEF int db_builder_append(db_builder* builder, const void* data, size_t size) {
+DB_DEF int db_builder_append(db_builder builder, const void* data, size_t size) {
     DB_ASSERT(builder && "db_builder_append: builder cannot be NULL");
-    DB_ASSERT(builder->data && "db_builder_append: builder data cannot be NULL");
     DB_ASSERT((data || size == 0) && "db_builder_append: data cannot be NULL when size > 0");
     
     if (size == 0) return 0;
@@ -1431,7 +1495,7 @@ DB_DEF int db_builder_append(db_builder* builder, const void* data, size_t size)
     return db_internal_append(&builder->data, &builder->capacity, data, size);
 }
 
-DB_DEF int db_builder_append_cstring(db_builder* builder, const char* str) {
+DB_DEF int db_builder_append_cstring(db_builder builder, const char* str) {
     DB_ASSERT(builder && "db_builder_append_cstring: builder cannot be NULL");
     DB_ASSERT(str && "db_builder_append_cstring: str cannot be NULL");
     
@@ -1439,7 +1503,7 @@ DB_DEF int db_builder_append_cstring(db_builder* builder, const char* str) {
     return db_builder_append(builder, str, len);
 }
 
-DB_DEF int db_builder_append_buffer(db_builder* builder, db_buffer buf) {
+DB_DEF int db_builder_append_buffer(db_builder builder, db_buffer buf) {
     DB_ASSERT(builder && "db_builder_append_buffer: builder cannot be NULL");
     DB_ASSERT(buf && "db_builder_append_buffer: buf cannot be NULL");
     
@@ -1454,21 +1518,36 @@ DB_DEF db_reader db_reader_new(db_buffer buf) {
     struct db_reader_internal* reader = (struct db_reader_internal*)DB_MALLOC(sizeof(struct db_reader_internal));
     DB_ASSERT(reader && "db_reader_new: memory allocation failed");
     
+    reader->refcount = DB_REFCOUNT_INIT(1);
     reader->buf = db_retain(buf);  // Keep a reference to the buffer
     reader->position = 0;
     
     return reader;
 }
 
-DB_DEF void db_reader_free(db_reader* reader_ptr) {
-    DB_ASSERT(reader_ptr && "db_reader_free: reader_ptr cannot be NULL");
+DB_DEF db_reader db_reader_retain(db_reader reader) {
+    DB_ASSERT(reader && "db_reader_retain: reader cannot be NULL");
+    DB_REFCOUNT_INCREMENT(&reader->refcount);
+    return reader;
+}
+
+DB_DEF void db_reader_release(db_reader* reader_ptr) {
+    DB_ASSERT(reader_ptr && "db_reader_release: reader_ptr cannot be NULL");
+    if (!*reader_ptr) return;
     
-    if (*reader_ptr) {
-        struct db_reader_internal* reader = *reader_ptr;
-        db_release(&reader->buf);  // Release buffer reference
+    db_reader reader = *reader_ptr;
+    *reader_ptr = NULL;
+    
+    if (DB_REFCOUNT_DECREMENT(&reader->refcount) == 0) {
+        // Reference count reached 0, free the reader and release buffer
+        db_release(&reader->buf);
         DB_FREE(reader);
-        *reader_ptr = NULL;
     }
+}
+
+DB_DEF void db_reader_free(db_reader* reader_ptr) {
+    // Legacy function - just call the new release function
+    db_reader_release(reader_ptr);
 }
 
 DB_DEF size_t db_reader_position(db_reader reader) {

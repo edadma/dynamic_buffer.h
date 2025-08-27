@@ -1,6 +1,6 @@
 # dynamic_buffer.h
 
-[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
+[![Version](https://img.shields.io/badge/version-v0.2.0-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
 [![Language](https://img.shields.io/badge/language-C11-blue.svg)](https://en.cppreference.com/w/c/11)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Unlicense-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20MCU-lightgrey.svg)](#building)
@@ -16,7 +16,7 @@ A modern, efficient, single-header byte buffer library for C featuring reference
 - Optional atomic reference counting for lock-free concurrent access
 
 **Memory Safe**
-- Reference counting prevents memory leaks and use-after-free
+- Reference counting prevents memory leaks and use-after-free for buffers, builders, and readers
 - Immutable buffers safe for concurrent reading once created
 - Bounds checking on all slice operations
 - Automatic cleanup when last reference is released
@@ -51,9 +51,9 @@ int main() {
     
     // Use builder for efficient construction
     db_builder builder = db_builder_new(64);
-    db_builder_append_cstring(&builder, "Built with ");
-    db_builder_append_uint16_le(&builder, 2024);
-    db_buffer built = db_builder_finish(&builder);
+    db_builder_append_cstring(builder, "Built with ");
+    db_builder_append_uint16_le(builder, 2024);
+    db_buffer built = db_builder_finish(&builder);  // builder becomes NULL
     
     // Clean up (reference counting handles memory)
     db_release(&buf);
@@ -87,9 +87,10 @@ Create independent copies of buffer portions:
 
 ### Builder Pattern
 Efficient construction of complex buffers:
-- `db_builder` provides mutable construction
+- `db_builder` provides mutable construction with reference counting
 - Append primitives with endianness control
 - Convert to immutable buffer when done
+- Reference counting allows safe sharing of builders
 
 ## API Overview
 
@@ -130,17 +131,21 @@ db_buffer db_append(db_buffer buf, const void* data, size_t size); // Create new
 ### Builder API
 ```c
 db_builder db_builder_new(size_t initial_capacity);              // Create builder
-int db_builder_append(db_builder* builder, const void* data, size_t size); // Append raw data
-int db_builder_append_uint16_le(db_builder* builder, uint16_t value);      // Append primitives
+db_builder db_builder_retain(db_builder builder);               // Increase builder refcount
+void db_builder_release(db_builder* builder_ptr);               // Decrease builder refcount
+int db_builder_append(db_builder builder, const void* data, size_t size); // Append raw data
+int db_builder_append_uint16_le(db_builder builder, uint16_t value);      // Append primitives
 db_buffer db_builder_finish(db_builder* builder_ptr);           // Convert to immutable buffer
 ```
 
 ### Reader API
 ```c
 db_reader db_reader_new(db_buffer buf);                          // Create reader
+db_reader db_reader_retain(db_reader reader);                   // Increase reader refcount
+void db_reader_release(db_reader* reader_ptr);                  // Decrease reader refcount
 uint16_t db_read_uint16_le(db_reader reader);                   // Read primitives
 void db_read_bytes(db_reader reader, void* data, size_t size);  // Read raw data
-void db_reader_free(db_reader* reader_ptr);                     // Free reader
+void db_reader_free(db_reader* reader_ptr);                     // Legacy compatibility
 ```
 
 ### Concatenation
