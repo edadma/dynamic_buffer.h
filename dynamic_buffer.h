@@ -424,6 +424,239 @@ DB_DEF void db_debug_print(db_buffer buf, const char* label);
 
 /** @} */
 
+/**
+ * @defgroup builder Buffer Builder API
+ * @brief Functions for building buffers with primitive types
+ * @{
+ */
+
+/**
+ * @brief Opaque builder handle for constructing buffers
+ */
+typedef struct db_builder_internal* db_builder;
+
+/**
+ * @brief Create a new buffer builder
+ * @param initial_capacity Initial capacity in bytes
+ * @return New builder instance
+ */
+DB_DEF db_builder db_builder_new(size_t initial_capacity);
+
+/**
+ * @brief Create builder from existing buffer (continues at end)
+ * @param buf_ptr Pointer to buffer to extend
+ * @return New builder instance
+ */
+DB_DEF db_builder db_builder_from_buffer(db_buffer* buf_ptr);
+
+/**
+ * @brief Finalize builder and return the constructed buffer
+ * @param builder_ptr Pointer to builder (will be set to NULL)
+ * @return Constructed buffer
+ */
+DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr);
+
+/**
+ * @brief Get current write position in builder
+ * @param builder Builder instance
+ * @return Current position in bytes
+ */
+DB_DEF size_t db_builder_position(db_builder builder);
+
+/**
+ * @brief Seek to specific position in builder
+ * @param builder Builder instance  
+ * @param position Position to seek to
+ */
+DB_DEF void db_builder_seek(db_builder builder, size_t position);
+
+/**
+ * @brief Write uint8 value
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint8(db_builder builder, uint8_t value);
+
+/**
+ * @brief Write uint16 value in little-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint16_le(db_builder builder, uint16_t value);
+
+/**
+ * @brief Write uint16 value in big-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint16_be(db_builder builder, uint16_t value);
+
+/**
+ * @brief Write uint32 value in little-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint32_le(db_builder builder, uint32_t value);
+
+/**
+ * @brief Write uint32 value in big-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint32_be(db_builder builder, uint32_t value);
+
+/**
+ * @brief Write uint64 value in little-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint64_le(db_builder builder, uint64_t value);
+
+/**
+ * @brief Write uint64 value in big-endian format
+ * @param builder Builder instance
+ * @param value Value to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_uint64_be(db_builder builder, uint64_t value);
+
+/**
+ * @brief Write raw bytes
+ * @param builder Builder instance
+ * @param data Data to write
+ * @param size Number of bytes to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_bytes(db_builder builder, const void* data, size_t size);
+
+/**
+ * @brief Write null-terminated string (without null terminator)
+ * @param builder Builder instance
+ * @param str String to write
+ * @return Same builder for chaining
+ */
+DB_DEF db_builder db_write_cstring(db_builder builder, const char* str);
+
+/** @} */
+
+/**
+ * @defgroup reader Buffer Reader API
+ * @brief Functions for reading buffers with primitive types and cursor
+ * @{
+ */
+
+/**
+ * @brief Opaque reader handle for parsing buffers
+ */
+typedef struct db_reader_internal* db_reader;
+
+/**
+ * @brief Create a new buffer reader
+ * @param buf Buffer to read from
+ * @return New reader instance
+ */
+DB_DEF db_reader db_reader_new(db_buffer buf);
+
+/**
+ * @brief Free reader resources
+ * @param reader_ptr Pointer to reader (will be set to NULL)
+ */
+DB_DEF void db_reader_free(db_reader* reader_ptr);
+
+/**
+ * @brief Get current read position
+ * @param reader Reader instance
+ * @return Current position in bytes
+ */
+DB_DEF size_t db_reader_position(db_reader reader);
+
+/**
+ * @brief Get number of bytes remaining
+ * @param reader Reader instance
+ * @return Remaining bytes from current position
+ */
+DB_DEF size_t db_reader_remaining(db_reader reader);
+
+/**
+ * @brief Check if reader can read specified number of bytes
+ * @param reader Reader instance
+ * @param bytes Number of bytes to check
+ * @return true if bytes are available
+ */
+DB_DEF bool db_reader_can_read(db_reader reader, size_t bytes);
+
+/**
+ * @brief Seek to specific position
+ * @param reader Reader instance
+ * @param position Position to seek to
+ */
+DB_DEF void db_reader_seek(db_reader reader, size_t position);
+
+/**
+ * @brief Read uint8 value
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint8_t db_read_uint8(db_reader reader);
+
+/**
+ * @brief Read uint16 value in little-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint16_t db_read_uint16_le(db_reader reader);
+
+/**
+ * @brief Read uint16 value in big-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint16_t db_read_uint16_be(db_reader reader);
+
+/**
+ * @brief Read uint32 value in little-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint32_t db_read_uint32_le(db_reader reader);
+
+/**
+ * @brief Read uint32 value in big-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint32_t db_read_uint32_be(db_reader reader);
+
+/**
+ * @brief Read uint64 value in little-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint64_t db_read_uint64_le(db_reader reader);
+
+/**
+ * @brief Read uint64 value in big-endian format
+ * @param reader Reader instance
+ * @return Read value
+ */
+DB_DEF uint64_t db_read_uint64_be(db_reader reader);
+
+/**
+ * @brief Read raw bytes
+ * @param reader Reader instance
+ * @param data Output buffer for data
+ * @param size Number of bytes to read
+ */
+DB_DEF void db_read_bytes(db_reader reader, void* data, size_t size);
+
+/** @} */
+
 // Implementation section - only compiled when DB_IMPLEMENTATION is defined
 #ifdef DB_IMPLEMENTATION
 
@@ -947,6 +1180,385 @@ DB_DEF void db_debug_print(db_buffer buf, const char* label) {
             printf("... (%zu more bytes)", size - 16);
         }
         printf("\n");
+    }
+}
+
+// Builder and Reader Implementation
+
+struct db_builder_internal {
+    db_buffer* buf_ptr;     // Pointer to the buffer being built (may reallocate)
+    size_t position;        // Current write position
+    bool owns_buf_ptr;      // Whether we allocated buf_ptr and should free it
+};
+
+struct db_reader_internal {
+    db_buffer buf;       // Buffer being read (retained reference)
+    size_t position;     // Current read position
+};
+
+// Builder implementation
+
+DB_DEF db_builder db_builder_new(size_t initial_capacity) {
+    struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
+    DB_ASSERT(builder); // Malloc failure is a serious error
+    
+    db_buffer* buf_ptr = (db_buffer*)DB_MALLOC(sizeof(db_buffer));
+    DB_ASSERT(buf_ptr); // Malloc failure is a serious error
+    
+    *buf_ptr = db_new(initial_capacity);
+    
+    builder->buf_ptr = buf_ptr;
+    builder->position = 0;
+    builder->owns_buf_ptr = true;  // We allocated buf_ptr
+    
+    return builder;
+}
+
+DB_DEF db_builder db_builder_from_buffer(db_buffer* buf_ptr) {
+    DB_ASSERT(buf_ptr && *buf_ptr);
+    
+    struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
+    DB_ASSERT(builder); // Malloc failure is a serious error
+    
+    builder->buf_ptr = buf_ptr;
+    builder->position = DB_HEADER(*buf_ptr)->size;
+    builder->owns_buf_ptr = false;  // User provided buf_ptr
+    
+    return builder;
+}
+
+DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr) {
+    DB_ASSERT(builder_ptr && *builder_ptr);
+    
+    struct db_builder_internal* builder = *builder_ptr;
+    db_buffer result = *(builder->buf_ptr);
+    
+    // Only free the buffer pointer if we allocated it
+    if (builder->owns_buf_ptr) {
+        DB_FREE(builder->buf_ptr);
+    }
+    DB_FREE(builder);
+    *builder_ptr = NULL;
+    
+    return result;
+}
+
+DB_DEF size_t db_builder_position(db_builder builder) {
+    DB_ASSERT(builder);
+    return builder->position;
+}
+
+DB_DEF void db_builder_seek(db_builder builder, size_t position) {
+    DB_ASSERT(builder);
+    db_buffer buf = *(builder->buf_ptr);
+    DB_ASSERT(position <= DB_HEADER(buf)->size); // Can't seek past current data
+    builder->position = position;
+}
+
+static void db_builder_ensure_space(db_builder builder, size_t bytes) {
+    DB_ASSERT(builder);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    size_t needed_size = builder->position + bytes;
+    
+    if (needed_size > DB_HEADER(buf)->capacity) {
+        // Need to grow the buffer
+        db_reserve(builder->buf_ptr, needed_size);
+    }
+    
+    // Update buffer size if we're writing past the current end
+    if (needed_size > DB_HEADER(*(builder->buf_ptr))->size) {
+        *DB_SIZE_PTR(*(builder->buf_ptr)) = needed_size;
+    }
+}
+
+DB_DEF db_builder db_write_uint8(db_builder builder, uint8_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 1);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    *(uint8_t*)(buf + builder->position) = value;
+    builder->position += 1;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint16_le(db_builder builder, uint16_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 2);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)(value & 0xFF);
+    ptr[1] = (uint8_t)((value >> 8) & 0xFF);
+    builder->position += 2;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint16_be(db_builder builder, uint16_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 2);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)((value >> 8) & 0xFF);
+    ptr[1] = (uint8_t)(value & 0xFF);
+    builder->position += 2;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint32_le(db_builder builder, uint32_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 4);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)(value & 0xFF);
+    ptr[1] = (uint8_t)((value >> 8) & 0xFF);
+    ptr[2] = (uint8_t)((value >> 16) & 0xFF);
+    ptr[3] = (uint8_t)((value >> 24) & 0xFF);
+    builder->position += 4;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint32_be(db_builder builder, uint32_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 4);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)((value >> 24) & 0xFF);
+    ptr[1] = (uint8_t)((value >> 16) & 0xFF);
+    ptr[2] = (uint8_t)((value >> 8) & 0xFF);
+    ptr[3] = (uint8_t)(value & 0xFF);
+    builder->position += 4;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint64_le(db_builder builder, uint64_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 8);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)(value & 0xFF);
+    ptr[1] = (uint8_t)((value >> 8) & 0xFF);
+    ptr[2] = (uint8_t)((value >> 16) & 0xFF);
+    ptr[3] = (uint8_t)((value >> 24) & 0xFF);
+    ptr[4] = (uint8_t)((value >> 32) & 0xFF);
+    ptr[5] = (uint8_t)((value >> 40) & 0xFF);
+    ptr[6] = (uint8_t)((value >> 48) & 0xFF);
+    ptr[7] = (uint8_t)((value >> 56) & 0xFF);
+    builder->position += 8;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_uint64_be(db_builder builder, uint64_t value) {
+    DB_ASSERT(builder);
+    
+    db_builder_ensure_space(builder, 8);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    uint8_t* ptr = (uint8_t*)(buf + builder->position);
+    ptr[0] = (uint8_t)((value >> 56) & 0xFF);
+    ptr[1] = (uint8_t)((value >> 48) & 0xFF);
+    ptr[2] = (uint8_t)((value >> 40) & 0xFF);
+    ptr[3] = (uint8_t)((value >> 32) & 0xFF);
+    ptr[4] = (uint8_t)((value >> 24) & 0xFF);
+    ptr[5] = (uint8_t)((value >> 16) & 0xFF);
+    ptr[6] = (uint8_t)((value >> 8) & 0xFF);
+    ptr[7] = (uint8_t)(value & 0xFF);
+    builder->position += 8;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_bytes(db_builder builder, const void* data, size_t size) {
+    DB_ASSERT(builder);
+    DB_ASSERT(data || size == 0);
+    
+    if (size == 0) return builder;
+    
+    db_builder_ensure_space(builder, size);
+    
+    db_buffer buf = *(builder->buf_ptr);
+    memcpy(buf + builder->position, data, size);
+    builder->position += size;
+    
+    return builder;
+}
+
+DB_DEF db_builder db_write_cstring(db_builder builder, const char* str) {
+    DB_ASSERT(builder);
+    DB_ASSERT(str);
+    
+    size_t len = strlen(str);
+    return db_write_bytes(builder, str, len);
+}
+
+// Reader implementation
+
+DB_DEF db_reader db_reader_new(db_buffer buf) {
+    DB_ASSERT(buf);
+    
+    struct db_reader_internal* reader = (struct db_reader_internal*)DB_MALLOC(sizeof(struct db_reader_internal));
+    DB_ASSERT(reader); // Malloc failure is a serious error
+    
+    reader->buf = db_retain(buf);  // Keep a reference to the buffer
+    reader->position = 0;
+    
+    return reader;
+}
+
+DB_DEF void db_reader_free(db_reader* reader_ptr) {
+    DB_ASSERT(reader_ptr);
+    
+    if (*reader_ptr) {
+        struct db_reader_internal* reader = *reader_ptr;
+        db_release(&reader->buf);  // Release buffer reference
+        DB_FREE(reader);
+        *reader_ptr = NULL;
+    }
+}
+
+DB_DEF size_t db_reader_position(db_reader reader) {
+    DB_ASSERT(reader);
+    return reader->position;
+}
+
+DB_DEF size_t db_reader_remaining(db_reader reader) {
+    DB_ASSERT(reader);
+    size_t buffer_size = DB_HEADER(reader->buf)->size;
+    return (reader->position < buffer_size) ? (buffer_size - reader->position) : 0;
+}
+
+DB_DEF bool db_reader_can_read(db_reader reader, size_t bytes) {
+    DB_ASSERT(reader);
+    return db_reader_remaining(reader) >= bytes;
+}
+
+DB_DEF void db_reader_seek(db_reader reader, size_t position) {
+    DB_ASSERT(reader);
+    size_t buffer_size = DB_HEADER(reader->buf)->size;
+    DB_ASSERT(position <= buffer_size); // Can't seek past buffer end
+    reader->position = position;
+}
+
+DB_DEF uint8_t db_read_uint8(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 1)); // Must have 1 byte available
+    
+    uint8_t value = *(uint8_t*)(reader->buf + reader->position);
+    reader->position += 1;
+    
+    return value;
+}
+
+DB_DEF uint16_t db_read_uint16_le(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 2)); // Must have 2 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint16_t value = (uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8);
+    reader->position += 2;
+    
+    return value;
+}
+
+DB_DEF uint16_t db_read_uint16_be(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 2)); // Must have 2 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint16_t value = ((uint16_t)ptr[0] << 8) | (uint16_t)ptr[1];
+    reader->position += 2;
+    
+    return value;
+}
+
+DB_DEF uint32_t db_read_uint32_le(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 4)); // Must have 4 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint32_t value = (uint32_t)ptr[0] | 
+                    ((uint32_t)ptr[1] << 8) | 
+                    ((uint32_t)ptr[2] << 16) | 
+                    ((uint32_t)ptr[3] << 24);
+    reader->position += 4;
+    
+    return value;
+}
+
+DB_DEF uint32_t db_read_uint32_be(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 4)); // Must have 4 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint32_t value = ((uint32_t)ptr[0] << 24) | 
+                    ((uint32_t)ptr[1] << 16) | 
+                    ((uint32_t)ptr[2] << 8) | 
+                    (uint32_t)ptr[3];
+    reader->position += 4;
+    
+    return value;
+}
+
+DB_DEF uint64_t db_read_uint64_le(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 8)); // Must have 8 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint64_t value = (uint64_t)ptr[0] | 
+                    ((uint64_t)ptr[1] << 8) | 
+                    ((uint64_t)ptr[2] << 16) | 
+                    ((uint64_t)ptr[3] << 24) |
+                    ((uint64_t)ptr[4] << 32) | 
+                    ((uint64_t)ptr[5] << 40) | 
+                    ((uint64_t)ptr[6] << 48) | 
+                    ((uint64_t)ptr[7] << 56);
+    reader->position += 8;
+    
+    return value;
+}
+
+DB_DEF uint64_t db_read_uint64_be(db_reader reader) {
+    DB_ASSERT(reader);
+    DB_ASSERT(db_reader_can_read(reader, 8)); // Must have 8 bytes available
+    
+    const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
+    uint64_t value = ((uint64_t)ptr[0] << 56) | 
+                    ((uint64_t)ptr[1] << 48) | 
+                    ((uint64_t)ptr[2] << 40) | 
+                    ((uint64_t)ptr[3] << 32) |
+                    ((uint64_t)ptr[4] << 24) | 
+                    ((uint64_t)ptr[5] << 16) | 
+                    ((uint64_t)ptr[6] << 8) | 
+                    (uint64_t)ptr[7];
+    reader->position += 8;
+    
+    return value;
+}
+
+DB_DEF void db_read_bytes(db_reader reader, void* data, size_t size) {
+    DB_ASSERT(reader);
+    DB_ASSERT(data || size == 0);
+    DB_ASSERT(db_reader_can_read(reader, size)); // Must have enough bytes available
+    
+    if (size > 0) {
+        memcpy(data, reader->buf + reader->position, size);
+        reader->position += size;
     }
 }
 

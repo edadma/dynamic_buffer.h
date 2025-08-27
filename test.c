@@ -439,6 +439,225 @@ void test_large_buffer_operations(void) {
     db_release(&buf);
 }
 
+// Builder API Tests
+
+void test_builder_basic_operations(void) {
+    db_builder builder = db_builder_new(64);
+    TEST_ASSERT_NOT_NULL(builder);
+    
+    TEST_ASSERT_EQUAL(0, db_builder_position(builder));
+    
+    db_buffer buf = db_builder_finish(&builder);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_NULL(builder);  // Should be set to NULL
+    
+    TEST_ASSERT_EQUAL(0, db_size(buf));
+    
+    db_release(&buf);
+}
+
+void test_builder_write_primitives(void) {
+    db_builder builder = db_builder_new(64);
+    
+    builder = db_write_uint8(builder, 0x42);
+    builder = db_write_uint16_le(builder, 0x1234);
+    builder = db_write_uint32_le(builder, 0x12345678);
+    builder = db_write_uint64_le(builder, 0x123456789ABCDEF0ULL);
+    
+    TEST_ASSERT_EQUAL(1 + 2 + 4 + 8, db_builder_position(builder));
+    
+    db_buffer buf = db_builder_finish(&builder);
+    TEST_ASSERT_EQUAL(15, db_size(buf));
+    
+    const uint8_t* data = (const uint8_t*)buf;
+    TEST_ASSERT_EQUAL(0x42, data[0]);
+    TEST_ASSERT_EQUAL(0x34, data[1]);
+    TEST_ASSERT_EQUAL(0x12, data[2]);
+    
+    db_release(&buf);
+}
+
+void test_builder_write_endianness(void) {
+    db_builder builder = db_builder_new(64);
+    
+    // Write same value in both endiannesses
+    builder = db_write_uint16_le(builder, 0x1234);
+    builder = db_write_uint16_be(builder, 0x1234);
+    
+    db_buffer buf = db_builder_finish(&builder);
+    const uint8_t* data = (const uint8_t*)buf;
+    
+    // Little-endian: 0x34, 0x12
+    TEST_ASSERT_EQUAL(0x34, data[0]);
+    TEST_ASSERT_EQUAL(0x12, data[1]);
+    
+    // Big-endian: 0x12, 0x34
+    TEST_ASSERT_EQUAL(0x12, data[2]);
+    TEST_ASSERT_EQUAL(0x34, data[3]);
+    
+    db_release(&buf);
+}
+
+void test_builder_from_buffer(void) {
+    db_buffer buf = db_new_with_data("Hello", 5);
+    
+    db_builder builder = db_builder_from_buffer(&buf);
+    TEST_ASSERT_EQUAL(5, db_builder_position(builder));
+    
+    builder = db_write_cstring(builder, " World");
+    
+    db_buffer result = db_builder_finish(&builder);
+    TEST_ASSERT_EQUAL(11, db_size(result));
+    TEST_ASSERT_EQUAL_MEMORY("Hello World", result, 11);
+    
+    // Original buf should still be valid and same as result
+    TEST_ASSERT_EQUAL(result, buf);
+    
+    db_release(&buf);
+}
+
+void test_builder_seek_operations(void) {
+    db_builder builder = db_builder_new(64);
+    
+    builder = db_write_uint32_le(builder, 0x12345678);
+    TEST_ASSERT_EQUAL(4, db_builder_position(builder));
+    
+    db_builder_seek(builder, 1);  // Seek to position 1
+    builder = db_write_uint16_le(builder, 0xABCD);
+    
+    db_buffer buf = db_builder_finish(&builder);
+    const uint8_t* data = (const uint8_t*)buf;
+    
+    TEST_ASSERT_EQUAL(0x78, data[0]);  // Original first byte
+    TEST_ASSERT_EQUAL(0xCD, data[1]);  // Overwritten
+    TEST_ASSERT_EQUAL(0xAB, data[2]);  // Overwritten
+    TEST_ASSERT_EQUAL(0x12, data[3]);  // Original last byte
+    
+    db_release(&buf);
+}
+
+// Reader API Tests
+
+void test_reader_basic_operations(void) {
+    db_buffer buf = db_new_with_data("Hello", 5);
+    
+    db_reader reader = db_reader_new(buf);
+    TEST_ASSERT_NOT_NULL(reader);
+    
+    TEST_ASSERT_EQUAL(0, db_reader_position(reader));
+    TEST_ASSERT_EQUAL(5, db_reader_remaining(reader));
+    TEST_ASSERT_TRUE(db_reader_can_read(reader, 5));
+    TEST_ASSERT_FALSE(db_reader_can_read(reader, 6));
+    
+    db_reader_free(&reader);
+    TEST_ASSERT_NULL(reader);  // Should be set to NULL
+    
+    db_release(&buf);
+}
+
+void test_reader_read_primitives(void) {
+    uint8_t test_data[] = {
+        0x42,                           // uint8
+        0x34, 0x12,                     // uint16_le (0x1234)
+        0x78, 0x56, 0x34, 0x12,        // uint32_le (0x12345678)
+        0xF0, 0xDE, 0xBC, 0x9A, 0x78, 0x56, 0x34, 0x12  // uint64_le
+    };
+    
+    db_buffer buf = db_new_with_data(test_data, sizeof(test_data));
+    db_reader reader = db_reader_new(buf);
+    
+    TEST_ASSERT_EQUAL(0x42, db_read_uint8(reader));
+    TEST_ASSERT_EQUAL(0x1234, db_read_uint16_le(reader));
+    TEST_ASSERT_EQUAL(0x12345678UL, db_read_uint32_le(reader));
+    TEST_ASSERT_EQUAL(0x123456789ABCDEF0ULL, db_read_uint64_le(reader));
+    
+    TEST_ASSERT_EQUAL(sizeof(test_data), db_reader_position(reader));
+    TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+void test_reader_read_endianness(void) {
+    uint8_t test_data[] = {
+        0x34, 0x12,  // Little-endian 0x1234
+        0x12, 0x34   // Big-endian 0x1234
+    };
+    
+    db_buffer buf = db_new_with_data(test_data, sizeof(test_data));
+    db_reader reader = db_reader_new(buf);
+    
+    TEST_ASSERT_EQUAL(0x1234, db_read_uint16_le(reader));
+    TEST_ASSERT_EQUAL(0x1234, db_read_uint16_be(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+void test_reader_bounds_checking(void) {
+    db_buffer buf = db_new_with_data("Hi", 2);
+    db_reader reader = db_reader_new(buf);
+    
+    // These should work
+    TEST_ASSERT_TRUE(db_reader_can_read(reader, 1));
+    TEST_ASSERT_TRUE(db_reader_can_read(reader, 2));
+    db_read_uint8(reader);  // Read one byte
+    
+    TEST_ASSERT_TRUE(db_reader_can_read(reader, 1));
+    TEST_ASSERT_FALSE(db_reader_can_read(reader, 2));
+    db_read_uint8(reader);  // Read second byte
+    
+    TEST_ASSERT_FALSE(db_reader_can_read(reader, 1));
+    TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+void test_reader_seek_operations(void) {
+    uint8_t test_data[] = {0x10, 0x20, 0x30, 0x40};
+    db_buffer buf = db_new_with_data(test_data, sizeof(test_data));
+    db_reader reader = db_reader_new(buf);
+    
+    TEST_ASSERT_EQUAL(0x10, db_read_uint8(reader));
+    
+    db_reader_seek(reader, 2);  // Seek to position 2
+    TEST_ASSERT_EQUAL(0x30, db_read_uint8(reader));
+    
+    db_reader_seek(reader, 0);  // Seek back to start
+    TEST_ASSERT_EQUAL(0x10, db_read_uint8(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+void test_builder_reader_roundtrip(void) {
+    // Build a complex buffer
+    db_builder builder = db_builder_new(64);
+    builder = db_write_uint8(builder, 0x42);
+    builder = db_write_uint16_le(builder, 0x1234);
+    builder = db_write_uint32_be(builder, 0x12345678);
+    builder = db_write_cstring(builder, "Test");
+    
+    db_buffer buf = db_builder_finish(&builder);
+    
+    // Read it back
+    db_reader reader = db_reader_new(buf);
+    
+    TEST_ASSERT_EQUAL(0x42, db_read_uint8(reader));
+    TEST_ASSERT_EQUAL(0x1234, db_read_uint16_le(reader));
+    TEST_ASSERT_EQUAL(0x12345678UL, db_read_uint32_be(reader));
+    
+    char str_buf[5] = {0};
+    db_read_bytes(reader, str_buf, 4);
+    TEST_ASSERT_EQUAL_STRING("Test", str_buf);
+    
+    TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
 int main(void) {
     UNITY_BEGIN();
     
@@ -490,6 +709,23 @@ int main(void) {
     RUN_TEST(test_db_from_hex_converts_correctly);
     RUN_TEST(test_db_from_hex_handles_invalid_input);
     RUN_TEST(test_db_debug_print_doesnt_crash);
+    
+    // Builder API tests
+    RUN_TEST(test_builder_basic_operations);
+    RUN_TEST(test_builder_write_primitives);
+    RUN_TEST(test_builder_write_endianness);
+    RUN_TEST(test_builder_from_buffer);
+    RUN_TEST(test_builder_seek_operations);
+    
+    // Reader API tests
+    RUN_TEST(test_reader_basic_operations);
+    RUN_TEST(test_reader_read_primitives);
+    RUN_TEST(test_reader_read_endianness);
+    RUN_TEST(test_reader_bounds_checking);
+    RUN_TEST(test_reader_seek_operations);
+    
+    // Builder + Reader integration tests
+    RUN_TEST(test_builder_reader_roundtrip);
     
     // Edge case tests
     RUN_TEST(test_empty_buffer_operations);
