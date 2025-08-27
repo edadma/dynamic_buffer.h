@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Unlicense-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20MCU-lightgrey.svg)](#building)
 
-A modern, efficient, single-header byte buffer library for C featuring reference counting, immutable operations, and I/O integration. Designed for safe, efficient buffer management with zero-copy slicing and automatic memory management.
+A modern, efficient, single-header byte buffer library for C featuring reference counting, immutable operations, and I/O integration. Designed for safe, efficient buffer management with immutable slicing and automatic memory management.
 
 ## Features
 
@@ -79,11 +79,11 @@ All buffers use reference counting for memory management:
 - `db_release()` decreases reference count (automatic cleanup)
 - Buffers are freed when reference count reaches zero
 
-### Zero-Copy Slicing
+### Buffer Slicing
 Create independent copies of buffer portions:
 - `db_slice()` creates an independent copy of a buffer portion
 - `db_slice_from()` and `db_slice_to()` for common slice patterns
-- Slices are independent buffers, not views
+- Slices are independent buffers with their own memory
 
 ### Builder Pattern
 Efficient construction of complex buffers:

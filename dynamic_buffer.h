@@ -5,7 +5,7 @@
  * @date August 2025
  *
  * Single header library for reference-counted byte buffers similar to libuv's buffer type.
- * Designed for efficient I/O operations, zero-copy slicing, and safe memory management
+ * Designed for efficient I/O operations, immutable slicing, and safe memory management
  * in both PC and microcontroller environments.
  *
  * @section config Configuration
@@ -29,7 +29,7 @@
  * // Create a buffer with some data
  * db_buffer buf = db_new_with_data("Hello", 5);
  * 
- * // Create a slice (zero-copy view)
+ * // Create a slice (independent copy)
  * db_buffer slice = db_slice(buf, 1, 4);  // "ello"
  * 
  * // Concatenate buffers
