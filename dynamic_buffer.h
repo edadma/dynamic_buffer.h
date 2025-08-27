@@ -504,7 +504,7 @@ DB_DEF db_buffer db_new_with_data(const void* data, size_t size) {
 }
 
 DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity) {
-    if (!data && (size > 0 || capacity > 0)) return NULL;
+    DB_ASSERT(data || (size == 0 && capacity == 0)); // Can't own NULL data with non-zero size/capacity
     if (capacity < size) return NULL;
     
     // We can't use the negative offset trick here since we don't control the data allocation
@@ -654,8 +654,8 @@ DB_DEF bool db_reserve(db_buffer* buf_ptr, size_t min_capacity) {
 
 DB_DEF bool db_append(db_buffer* buf_ptr, const void* data, size_t size) {
     DB_ASSERT(buf_ptr && *buf_ptr);
+    DB_ASSERT(data || size == 0);
     if (size == 0) return true;
-    if (!data) return false;
     
     db_buffer buf = *buf_ptr;
     
