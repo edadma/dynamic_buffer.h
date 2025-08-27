@@ -95,10 +95,7 @@ void test_db_retain_increases_refcount(void) {
     db_release(&buf2);
 }
 
-void test_db_retain_handles_null(void) {
-    db_buffer buf = db_retain(NULL);
-    TEST_ASSERT_NULL(buf);
-}
+// test_db_retain_handles_null removed - db_retain now requires non-NULL buffer
 
 void test_db_release_handles_null(void) {
     db_buffer buf = NULL;
@@ -270,28 +267,7 @@ void test_db_concat_joins_buffers(void) {
     db_release(&result);
 }
 
-void test_db_concat_handles_null_buffers(void) {
-    db_buffer buf1 = db_new_with_data("Hello", 5);
-    
-    db_buffer result1 = db_concat(buf1, NULL);
-    TEST_ASSERT_NOT_NULL(result1);
-    TEST_ASSERT_EQUAL(5, db_size(result1));
-    TEST_ASSERT_EQUAL_MEMORY("Hello", result1, 5);
-    
-    db_buffer result2 = db_concat(NULL, buf1);
-    TEST_ASSERT_NOT_NULL(result2);
-    TEST_ASSERT_EQUAL(5, db_size(result2));
-    TEST_ASSERT_EQUAL_MEMORY("Hello", result2, 5);
-    
-    db_buffer result3 = db_concat(NULL, NULL);
-    TEST_ASSERT_NOT_NULL(result3);
-    TEST_ASSERT_EQUAL(0, db_size(result3));
-    
-    db_release(&buf1);
-    db_release(&result1);
-    db_release(&result2);
-    db_release(&result3);
-}
+// test_db_concat_handles_null_buffers removed - db_concat now requires non-NULL buffers
 
 void test_db_concat_many_joins_multiple_buffers(void) {
     db_buffer buf1 = db_new_with_data("A", 1);
@@ -326,15 +302,7 @@ void test_db_equals_compares_contents(void) {
     db_release(&buf3);
 }
 
-void test_db_equals_handles_null_buffers(void) {
-    db_buffer buf = db_new_with_data("Hello", 5);
-    
-    TEST_ASSERT_FALSE(db_equals(buf, NULL));
-    TEST_ASSERT_FALSE(db_equals(NULL, buf));
-    TEST_ASSERT_TRUE(db_equals(NULL, NULL));
-    
-    db_release(&buf);
-}
+// test_db_equals_handles_null_buffers removed - db_equals now requires non-NULL buffers
 
 void test_db_compare_returns_correct_order(void) {
     db_buffer buf1 = db_new_with_data("Apple", 5);
@@ -671,7 +639,7 @@ int main(void) {
     
     // Reference counting tests
     RUN_TEST(test_db_retain_increases_refcount);
-    RUN_TEST(test_db_retain_handles_null);
+    // RUN_TEST(test_db_retain_handles_null); // Removed - function now requires non-NULL
     RUN_TEST(test_db_release_handles_null);
     
     // Data access tests
@@ -696,12 +664,12 @@ int main(void) {
     
     // Concatenation tests
     RUN_TEST(test_db_concat_joins_buffers);
-    RUN_TEST(test_db_concat_handles_null_buffers);
+    // RUN_TEST(test_db_concat_handles_null_buffers); // Removed - function now requires non-NULL
     RUN_TEST(test_db_concat_many_joins_multiple_buffers);
     
     // Comparison tests
     RUN_TEST(test_db_equals_compares_contents);
-    RUN_TEST(test_db_equals_handles_null_buffers);
+    // RUN_TEST(test_db_equals_handles_null_buffers); // Removed - function now requires non-NULL
     RUN_TEST(test_db_compare_returns_correct_order);
     
     // Utility tests

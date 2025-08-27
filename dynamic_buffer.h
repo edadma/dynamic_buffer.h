@@ -667,86 +667,94 @@ DB_DEF void db_read_bytes(db_reader reader, void* data, size_t size);
  * This structure is stored at negative offsets before the buffer data.
  * The db_buffer points directly to the data portion.
  */
-struct db_buffer_header {
+typedef struct db_internal {
     db_refcount_t refcount;    ///< Reference count for memory management
     size_t size;               ///< Current size of valid data in bytes
     size_t capacity;           ///< Total allocated capacity in bytes
-};
-
-// Helper macros to access metadata at negative offsets
-#define DB_HEADER(buf) ((struct db_buffer_header*)((char*)(buf) - sizeof(struct db_buffer_header)))
-#define DB_REFCOUNT(buf) (&DB_HEADER(buf)->refcount)
-#define DB_SIZE_PTR(buf) (&DB_HEADER(buf)->size)
-#define DB_CAPACITY_PTR(buf) (&DB_HEADER(buf)->capacity)
+} db_internal;
 
 /**
- * @brief Create internal buffer with metadata at negative offset
- * @private
+ * @brief Get pointer to metadata for a buffer
+ * @param buf Buffer handle (must not be NULL)
+ * @return Pointer to metadata structure
  */
-static db_buffer db_internal_create(size_t capacity) {
-    // Allocate space for header + data
-    size_t total_size = sizeof(struct db_buffer_header) + capacity;
-    
-    // Check for overflow
-    DB_ASSERT(total_size >= sizeof(struct db_buffer_header)); // Detect overflow
-    DB_ASSERT(total_size >= capacity); // Detect overflow
-    
-    void* raw_memory = DB_MALLOC(total_size);
-    DB_ASSERT(raw_memory); // Malloc failure is a serious system error
-    
-    // Set up header at the beginning
-    struct db_buffer_header* header = (struct db_buffer_header*)raw_memory;
-    header->refcount = DB_REFCOUNT_INIT(1);
-    header->size = 0;
-    header->capacity = capacity;
-    
-    // Return pointer to data portion (after header)
-    return (db_buffer)((char*)raw_memory + sizeof(struct db_buffer_header));
+static inline db_internal* db_meta(db_buffer buf) {
+    return (db_internal*)((char*)(buf) - sizeof(db_internal));
 }
 
 /**
- * @brief Free internal buffer structure
+ * @brief Allocate memory for buffer with metadata
  * @private
  */
-static void db_internal_free(db_buffer buf) {
+static db_buffer db_alloc(size_t capacity) {
+    // Allocate: metadata + buffer data
+    size_t total_size = sizeof(db_internal) + capacity;
+    
+    // Check for overflow
+    if (total_size < sizeof(db_internal) || total_size < capacity) {
+        return NULL;
+    }
+    
+    void* block = DB_MALLOC(total_size);
+    if (!block) return NULL;
+    
+    // Initialize metadata
+    db_internal* meta = (db_internal*)block;
+    meta->refcount = DB_REFCOUNT_INIT(1);
+    meta->size = 0;
+    meta->capacity = capacity;
+    
+    // Return pointer to buffer data portion
+    return (db_buffer)((char*)block + sizeof(db_internal));
+}
+
+/**
+ * @brief Free buffer memory
+ * @private
+ */
+static void db_dealloc(db_buffer buf) {
     if (!buf) return;
     
-    struct db_buffer_header* header = DB_HEADER(buf);
-    
-    // Free header + data together (they were allocated as one block)
-    DB_FREE(header);
+    // Get original malloc pointer and free it
+    void* block = (char*)buf - sizeof(db_internal);
+    DB_FREE(block);
 }
 
 // Implementation of public functions
 
 DB_DEF db_buffer db_new(size_t capacity) {
-    return db_internal_create(capacity);
+    return db_alloc(capacity);
 }
 
 DB_DEF db_buffer db_new_with_data(const void* data, size_t size) {
-    DB_ASSERT(data || size == 0); // Programming error: can't copy from NULL pointer
+    DB_ASSERT((data || size == 0) && "db_new_with_data: data cannot be NULL when size > 0");
     
-    db_buffer buf = db_internal_create(size);
+    db_buffer buf = db_alloc(size);
+    if (!buf) return NULL;
     
     if (size > 0) {
         memcpy(buf, data, size);
-        *DB_SIZE_PTR(buf) = size;
+        db_meta(buf)->size = size;
     }
     
     return buf;
 }
 
 DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity) {
-    DB_ASSERT(data || (size == 0 && capacity == 0)); // Can't own NULL data with non-zero size/capacity
-    if (capacity < size) return NULL;
+    DB_ASSERT((data || (size == 0 && capacity == 0)) && "db_new_from_owned_data: data cannot be NULL with non-zero size/capacity");
+    DB_ASSERT(capacity >= size && "db_new_from_owned_data: capacity must be >= size");
     
     // We can't use the negative offset trick here since we don't control the data allocation
     // Instead, we'll copy the data to maintain design consistency
-    db_buffer buf = db_internal_create(capacity);
+    db_buffer buf = db_alloc(capacity);
+    if (!buf) {
+        DB_FREE(data); // Free the data since we're taking ownership
+        return NULL;
+    }
     
     if (size > 0) {
         memcpy(buf, data, size);
-        *DB_SIZE_PTR(buf) = size;
+        db_meta(buf)->size = size;
     }
     
     // Free the original data since we copied it
@@ -756,191 +764,203 @@ DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity
 }
 
 DB_DEF db_buffer db_retain(db_buffer buf) {
-    if (!buf) return NULL;
-    DB_REFCOUNT_INCREMENT(DB_REFCOUNT(buf));
+    DB_ASSERT(buf && "db_retain: buf cannot be NULL");
+    DB_REFCOUNT_INCREMENT(&db_meta(buf)->refcount);
     return buf;
 }
 
 DB_DEF void db_release(db_buffer* buf_ptr) {
-    DB_ASSERT(buf_ptr); // buf_ptr must not be NULL - this is a programming error
-    if (!*buf_ptr) return; // Allow releasing NULL buffer
+    DB_ASSERT(buf_ptr && "db_release: buf_ptr cannot be NULL");
+    if (!*buf_ptr) return;
     
     db_buffer buf = *buf_ptr;
     *buf_ptr = NULL;
     
-    if (DB_REFCOUNT_DECREMENT(DB_REFCOUNT(buf)) == 0) {
+    if (DB_REFCOUNT_DECREMENT(&db_meta(buf)->refcount) == 0) {
         // Reference count reached 0, free the buffer
-        db_internal_free(buf);
+        db_dealloc(buf);
     }
 }
 
 
 DB_DEF size_t db_size(db_buffer buf) {
-    DB_ASSERT(buf);
-    return DB_HEADER(buf)->size;
+    DB_ASSERT(buf && "db_size: buf cannot be NULL");
+    return db_meta(buf)->size;
 }
 
 DB_DEF size_t db_capacity(db_buffer buf) {
-    DB_ASSERT(buf);
-    return DB_HEADER(buf)->capacity;
+    DB_ASSERT(buf && "db_capacity: buf cannot be NULL");
+    return db_meta(buf)->capacity;
 }
 
 DB_DEF bool db_is_empty(db_buffer buf) {
-    DB_ASSERT(buf);
-    return DB_HEADER(buf)->size == 0;
+    DB_ASSERT(buf && "db_is_empty: buf cannot be NULL");
+    return db_meta(buf)->size == 0;
 }
 
 DB_DEF int db_refcount(db_buffer buf) {
-    DB_ASSERT(buf);
-    return DB_REFCOUNT_LOAD(DB_REFCOUNT(buf));
+    DB_ASSERT(buf && "db_refcount: buf cannot be NULL");
+    return DB_REFCOUNT_LOAD(&db_meta(buf)->refcount);
 }
 
 DB_DEF db_buffer db_slice(db_buffer buf, size_t offset, size_t length) {
-    DB_ASSERT(buf);
-    if (offset > DB_HEADER(buf)->size || offset + length > DB_HEADER(buf)->size) {
+    DB_ASSERT(buf && "db_slice: buf cannot be NULL");
+    
+    size_t buf_size = db_meta(buf)->size;
+    if (offset > buf_size || offset + length > buf_size) {
         return NULL; // Invalid bounds
     }
     
-    // Copy the slice data to maintain the negative-offset pattern for all buffers
-    db_buffer slice = db_internal_create(length);
+    // Create an independent copy of the slice data
+    db_buffer slice = db_alloc(length);
+    if (!slice) return NULL;
     
     // Copy the slice data directly from the source buffer
     if (length > 0) {
         memcpy(slice, buf + offset, length);
-        *DB_SIZE_PTR(slice) = length;
+        db_meta(slice)->size = length;
     }
     
     return slice;
 }
 
 DB_DEF db_buffer db_slice_from(db_buffer buf, size_t offset) {
-    DB_ASSERT(buf);
-    if (offset > DB_HEADER(buf)->size) return NULL;
-    return db_slice(buf, offset, DB_HEADER(buf)->size - offset);
+    DB_ASSERT(buf && "db_slice_from: buf cannot be NULL");
+    size_t buf_size = db_meta(buf)->size;
+    if (offset > buf_size) return NULL;
+    return db_slice(buf, offset, buf_size - offset);
 }
 
 DB_DEF db_buffer db_slice_to(db_buffer buf, size_t length) {
-    DB_ASSERT(buf);
-    if (length > DB_HEADER(buf)->size) return NULL;
+    DB_ASSERT(buf && "db_slice_to: buf cannot be NULL");
+    if (length > db_meta(buf)->size) return NULL;
     return db_slice(buf, 0, length);
 }
 
 DB_DEF bool db_resize(db_buffer* buf_ptr, size_t new_size) {
-    DB_ASSERT(buf_ptr && *buf_ptr);
+    DB_ASSERT(buf_ptr && *buf_ptr && "db_resize: buf_ptr and *buf_ptr cannot be NULL");
     db_buffer buf = *buf_ptr;
+    db_internal* meta = db_meta(buf);
     
     // Cannot resize shared buffers
-    if (DB_REFCOUNT_LOAD(DB_REFCOUNT(buf)) > 1) {
+    if (DB_REFCOUNT_LOAD(&meta->refcount) > 1) {
         return false;
     }
     
-    if (new_size <= DB_HEADER(buf)->capacity) {
-        *DB_SIZE_PTR(buf) = new_size;
+    if (new_size <= meta->capacity) {
+        meta->size = new_size;
         return true;
     }
     
     // Need to grow the buffer - reallocate header + data together
     size_t new_capacity = new_size * 2; // Grow by 2x for efficiency
-    size_t total_size = sizeof(struct db_buffer_header) + new_capacity;
+    size_t total_size = sizeof(db_internal) + new_capacity;
     
-    struct db_buffer_header* old_header = DB_HEADER(buf);
-    void* new_memory = DB_REALLOC(old_header, total_size);
+    void* old_block = (char*)buf - sizeof(db_internal);
+    void* new_memory = DB_REALLOC(old_block, total_size);
     if (!new_memory) return false;
     
-    // Update header in new location
-    struct db_buffer_header* new_header = (struct db_buffer_header*)new_memory;
-    new_header->capacity = new_capacity;
-    new_header->size = new_size;
+    // Update metadata in new location
+    db_internal* new_meta = (db_internal*)new_memory;
+    new_meta->capacity = new_capacity;
+    new_meta->size = new_size;
     
-    // Update caller's buffer pointer (header + sizeof(header))
-    *buf_ptr = (db_buffer)((char*)new_memory + sizeof(struct db_buffer_header));
+    // Update caller's buffer pointer
+    *buf_ptr = (db_buffer)((char*)new_memory + sizeof(db_internal));
     
     return true;
 }
 
 DB_DEF bool db_reserve(db_buffer* buf_ptr, size_t min_capacity) {
-    DB_ASSERT(buf_ptr && *buf_ptr);
+    DB_ASSERT(buf_ptr && *buf_ptr && "db_reserve: buf_ptr and *buf_ptr cannot be NULL");
     db_buffer buf = *buf_ptr;
+    db_internal* meta = db_meta(buf);
     
-    if (min_capacity <= DB_HEADER(buf)->capacity) return true;
+    if (min_capacity <= meta->capacity) return true;
     
     // Cannot resize shared buffers
-    if (DB_REFCOUNT_LOAD(DB_REFCOUNT(buf)) > 1) {
+    if (DB_REFCOUNT_LOAD(&meta->refcount) > 1) {
         return false;
     }
     
     // Reallocate header + data together
-    size_t total_size = sizeof(struct db_buffer_header) + min_capacity;
-    struct db_buffer_header* old_header = DB_HEADER(buf);
-    void* new_memory = DB_REALLOC(old_header, total_size);
+    size_t total_size = sizeof(db_internal) + min_capacity;
+    void* old_block = (char*)buf - sizeof(db_internal);
+    void* new_memory = DB_REALLOC(old_block, total_size);
     if (!new_memory) return false;
     
-    // Update header in new location
-    struct db_buffer_header* new_header = (struct db_buffer_header*)new_memory;
-    new_header->capacity = min_capacity;
+    // Update metadata in new location
+    db_internal* new_meta = (db_internal*)new_memory;
+    new_meta->capacity = min_capacity;
     
     // Update caller's buffer pointer
-    *buf_ptr = (db_buffer)((char*)new_memory + sizeof(struct db_buffer_header));
+    *buf_ptr = (db_buffer)((char*)new_memory + sizeof(db_internal));
     
     return true;
 }
 
 DB_DEF bool db_append(db_buffer* buf_ptr, const void* data, size_t size) {
-    DB_ASSERT(buf_ptr && *buf_ptr);
-    DB_ASSERT(data || size == 0);
+    DB_ASSERT(buf_ptr && *buf_ptr && "db_append: buf_ptr and *buf_ptr cannot be NULL");
+    DB_ASSERT((data || size == 0) && "db_append: data cannot be NULL when size > 0");
     if (size == 0) return true;
     
     db_buffer buf = *buf_ptr;
+    db_internal* meta = db_meta(buf);
     
     // Cannot modify shared buffers
-    if (DB_REFCOUNT_LOAD(DB_REFCOUNT(buf)) > 1) {
+    if (DB_REFCOUNT_LOAD(&meta->refcount) > 1) {
         return false;
     }
     
-    size_t old_size = DB_HEADER(buf)->size;
-    if (old_size + size > DB_HEADER(buf)->capacity) {
+    size_t old_size = meta->size;
+    if (old_size + size > meta->capacity) {
         if (!db_reserve(buf_ptr, old_size + size)) {
             return false;
         }
         buf = *buf_ptr; // Update buf after potential reallocation
+        meta = db_meta(buf); // Update meta pointer
     }
     
     memcpy(buf + old_size, data, size);
-    *DB_SIZE_PTR(buf) = old_size + size;
+    meta->size = old_size + size;
     return true;
 }
 
 DB_DEF bool db_clear(db_buffer buf) {
-    DB_ASSERT(buf);
+    DB_ASSERT(buf && "db_clear: buf cannot be NULL");
+    db_internal* meta = db_meta(buf);
     
     // Cannot modify shared buffers
-    if (DB_REFCOUNT_LOAD(DB_REFCOUNT(buf)) > 1) {
+    if (DB_REFCOUNT_LOAD(&meta->refcount) > 1) {
         return false;
     }
     
-    *DB_SIZE_PTR(buf) = 0;
+    meta->size = 0;
     return true;
 }
 
 DB_DEF db_buffer db_concat(db_buffer buf1, db_buffer buf2) {
-    size_t size1 = buf1 ? DB_HEADER(buf1)->size : 0;
-    size_t size2 = buf2 ? DB_HEADER(buf2)->size : 0;
+    DB_ASSERT(buf1 && "db_concat: buf1 cannot be NULL");
+    DB_ASSERT(buf2 && "db_concat: buf2 cannot be NULL");
+    
+    size_t size1 = db_meta(buf1)->size;
+    size_t size2 = db_meta(buf2)->size;
     size_t total_size = size1 + size2;
     
     if (total_size == 0) return db_new(0);
     
     db_buffer result = db_new(total_size);
+    if (!result) return NULL;
     
     if (size1 > 0) {
         memcpy(result, buf1, size1);
-        *DB_SIZE_PTR(result) = size1;
     }
     
     if (size2 > 0) {
         memcpy(result + size1, buf2, size2);
-        *DB_SIZE_PTR(result) = total_size;
     }
     
+    db_meta(result)->size = total_size;
     return result;
 }
 
@@ -951,16 +971,17 @@ DB_DEF db_buffer db_concat_many(db_buffer* buffers, size_t count) {
     size_t total_size = 0;
     for (size_t i = 0; i < count; i++) {
         if (buffers[i]) {
-            total_size += DB_HEADER(buffers[i])->size;
+            total_size += db_meta(buffers[i])->size;
         }
     }
     
     db_buffer result = db_new(total_size);
+    if (!result) return NULL;
     
     size_t offset = 0;
     for (size_t i = 0; i < count; i++) {
         if (buffers[i]) {
-            size_t size = DB_HEADER(buffers[i])->size;
+            size_t size = db_meta(buffers[i])->size;
             if (size > 0) {
                 memcpy(result + offset, buffers[i], size);
                 offset += size;
@@ -968,28 +989,31 @@ DB_DEF db_buffer db_concat_many(db_buffer* buffers, size_t count) {
         }
     }
     
-    *DB_SIZE_PTR(result) = total_size;
+    db_meta(result)->size = total_size;
     return result;
 }
 
 DB_DEF bool db_equals(db_buffer buf1, db_buffer buf2) {
-    if (buf1 == buf2) return true;
-    if (!buf1 || !buf2) return false;
+    DB_ASSERT(buf1 && "db_equals: buf1 cannot be NULL");
+    DB_ASSERT(buf2 && "db_equals: buf2 cannot be NULL");
     
-    size_t size1 = DB_HEADER(buf1)->size;
-    size_t size2 = DB_HEADER(buf2)->size;
+    if (buf1 == buf2) return true;
+    
+    size_t size1 = db_meta(buf1)->size;
+    size_t size2 = db_meta(buf2)->size;
     if (size1 != size2) return false;
     
     return memcmp(buf1, buf2, size1) == 0;
 }
 
 DB_DEF int db_compare(db_buffer buf1, db_buffer buf2) {
-    if (buf1 == buf2) return 0;
-    if (!buf1) return !buf2 ? 0 : -1;
-    if (!buf2) return 1;
+    DB_ASSERT(buf1 && "db_compare: buf1 cannot be NULL");
+    DB_ASSERT(buf2 && "db_compare: buf2 cannot be NULL");
     
-    size_t size1 = DB_HEADER(buf1)->size;
-    size_t size2 = DB_HEADER(buf2)->size;
+    if (buf1 == buf2) return 0;
+    
+    size_t size1 = db_meta(buf1)->size;
+    size_t size2 = db_meta(buf2)->size;
     size_t min_size = size1 < size2 ? size1 : size2;
     
     int result = memcmp(buf1, buf2, min_size);
@@ -1014,37 +1038,39 @@ DB_DEF int db_compare(db_buffer buf1, db_buffer buf2) {
 #endif
 
 DB_DEF ssize_t db_read_fd(db_buffer* buf_ptr, int fd, size_t max_bytes) {
-    DB_ASSERT(buf_ptr && *buf_ptr); // Programming error - must provide valid buffer pointer
-    DB_ASSERT(fd >= 0); // Programming error - invalid file descriptor
+    DB_ASSERT(buf_ptr && *buf_ptr && "db_read_fd: buf_ptr and *buf_ptr cannot be NULL");
+    DB_ASSERT(fd >= 0 && "db_read_fd: invalid file descriptor");
     db_buffer buf = *buf_ptr;
+    db_internal* meta = db_meta(buf);
     
     // Cannot modify shared buffers
-    if (DB_REFCOUNT_LOAD(DB_REFCOUNT(buf)) > 1) {
+    if (DB_REFCOUNT_LOAD(&meta->refcount) > 1) {
         return -1;
     }
     
     // Ensure we have space to read
     size_t read_size = max_bytes == 0 ? 4096 : max_bytes; // Default chunk size
-    size_t current_size = DB_HEADER(buf)->size;
-    if (current_size + read_size > DB_HEADER(buf)->capacity) {
+    size_t current_size = meta->size;
+    if (current_size + read_size > meta->capacity) {
         if (!db_reserve(buf_ptr, current_size + read_size)) {
             return -1;
         }
         buf = *buf_ptr; // Update buf after potential reallocation
+        meta = db_meta(buf); // Update meta pointer
     }
     
     ssize_t bytes_read = db_read(fd, buf + current_size, read_size);
     if (bytes_read > 0) {
-        *DB_SIZE_PTR(buf) = current_size + bytes_read;
+        meta->size = current_size + bytes_read;
     }
     
     return bytes_read;
 }
 
 DB_DEF ssize_t db_write_fd(db_buffer buf, int fd) {
-    DB_ASSERT(buf); // Programming error - buffer must not be NULL
-    DB_ASSERT(fd >= 0); // Programming error - invalid file descriptor  
-    size_t size = DB_HEADER(buf)->size;
+    DB_ASSERT(buf && "db_write_fd: buf cannot be NULL");
+    DB_ASSERT(fd >= 0 && "db_write_fd: invalid file descriptor");
+    size_t size = db_meta(buf)->size;
     if (size == 0) return 0;
     
     return db_write(fd, buf, size);
@@ -1075,19 +1101,19 @@ DB_DEF db_buffer db_read_file(const char* filename) {
     size_t bytes_read = fread(buf, 1, file_size, file);
     fclose(file);
     
-    *DB_SIZE_PTR(buf) = bytes_read;
+    db_meta(buf)->size = bytes_read;
     return buf;
 }
 
 DB_DEF bool db_write_file(db_buffer buf, const char* filename) {
-    DB_ASSERT(buf); // Programming error - buffer must not be NULL
-    if (!filename) return false; // Allow NULL filename as runtime error
+    DB_ASSERT(buf && "db_write_file: buf cannot be NULL");
+    if (!filename) return false;
     
     FILE* file = fopen(filename, "wb");
     if (!file) return false;
     
     bool success = true;
-    size_t size = DB_HEADER(buf)->size;
+    size_t size = db_meta(buf)->size;
     if (size > 0) {
         size_t written = fwrite(buf, 1, size, file);
         success = (written == size);
@@ -1099,13 +1125,14 @@ DB_DEF bool db_write_file(db_buffer buf, const char* filename) {
 
 // Utility functions
 DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase) {
-    DB_ASSERT(buf);
+    DB_ASSERT(buf && "db_to_hex: buf cannot be NULL");
     
-    size_t size = DB_HEADER(buf)->size;
+    size_t size = db_meta(buf)->size;
     if (size == 0) return db_new_with_data("", 0);
     
     size_t hex_size = size * 2;
     db_buffer hex_buf = db_new(hex_size);
+    if (!hex_buf) return NULL;
     
     const char* hex_chars = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
     const uint8_t* data = (const uint8_t*)buf;
@@ -1116,7 +1143,7 @@ DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase) {
         hex_data[i * 2 + 1] = hex_chars[data[i] & 0x0F];
     }
     
-    *DB_SIZE_PTR(hex_buf) = hex_size;
+    db_meta(hex_buf)->size = hex_size;
     return hex_buf;
 }
 
@@ -1132,6 +1159,7 @@ DB_DEF db_buffer db_from_hex(const char* hex_string, size_t length) {
     
     size_t byte_length = length / 2;
     db_buffer buf = db_new(byte_length);
+    if (!buf) return NULL;
     
     uint8_t* data = (uint8_t*)buf;
     
@@ -1147,7 +1175,7 @@ DB_DEF db_buffer db_from_hex(const char* hex_string, size_t length) {
         data[i] = (uint8_t)((high << 4) | low);
     }
     
-    *DB_SIZE_PTR(buf) = byte_length;
+    db_meta(buf)->size = byte_length;
     return buf;
 }
 
@@ -1159,9 +1187,10 @@ DB_DEF void db_debug_print(db_buffer buf, const char* label) {
         return;
     }
     
-    size_t size = DB_HEADER(buf)->size;
-    size_t capacity = DB_HEADER(buf)->capacity;
-    int refcount = DB_REFCOUNT_LOAD(DB_REFCOUNT(buf));
+    db_internal* meta = db_meta(buf);
+    size_t size = meta->size;
+    size_t capacity = meta->capacity;
+    int refcount = DB_REFCOUNT_LOAD(&meta->refcount);
     
     printf("%s: size=%zu, capacity=%zu, refcount=%d\n",
            name, size, capacity, refcount);
@@ -1200,10 +1229,10 @@ struct db_reader_internal {
 
 DB_DEF db_builder db_builder_new(size_t initial_capacity) {
     struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
-    DB_ASSERT(builder); // Malloc failure is a serious error
+    DB_ASSERT(builder && "db_builder_new: memory allocation failed");
     
     db_buffer* buf_ptr = (db_buffer*)DB_MALLOC(sizeof(db_buffer));
-    DB_ASSERT(buf_ptr); // Malloc failure is a serious error
+    DB_ASSERT(buf_ptr && "db_builder_new: memory allocation failed");
     
     *buf_ptr = db_new(initial_capacity);
     
@@ -1215,20 +1244,20 @@ DB_DEF db_builder db_builder_new(size_t initial_capacity) {
 }
 
 DB_DEF db_builder db_builder_from_buffer(db_buffer* buf_ptr) {
-    DB_ASSERT(buf_ptr && *buf_ptr);
+    DB_ASSERT(buf_ptr && *buf_ptr && "db_builder_from_buffer: buf_ptr and *buf_ptr cannot be NULL");
     
     struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
-    DB_ASSERT(builder); // Malloc failure is a serious error
+    DB_ASSERT(builder && "db_builder_from_buffer: memory allocation failed");
     
     builder->buf_ptr = buf_ptr;
-    builder->position = DB_HEADER(*buf_ptr)->size;
+    builder->position = db_meta(*buf_ptr)->size;
     builder->owns_buf_ptr = false;  // User provided buf_ptr
     
     return builder;
 }
 
 DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr) {
-    DB_ASSERT(builder_ptr && *builder_ptr);
+    DB_ASSERT(builder_ptr && *builder_ptr && "db_builder_finish: builder_ptr and *builder_ptr cannot be NULL");
     
     struct db_builder_internal* builder = *builder_ptr;
     db_buffer result = *(builder->buf_ptr);
@@ -1244,36 +1273,39 @@ DB_DEF db_buffer db_builder_finish(db_builder* builder_ptr) {
 }
 
 DB_DEF size_t db_builder_position(db_builder builder) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_builder_position: builder cannot be NULL");
     return builder->position;
 }
 
 DB_DEF void db_builder_seek(db_builder builder, size_t position) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_builder_seek: builder cannot be NULL");
     db_buffer buf = *(builder->buf_ptr);
-    DB_ASSERT(position <= DB_HEADER(buf)->size); // Can't seek past current data
+    DB_ASSERT(position <= db_meta(buf)->size && "db_builder_seek: cannot seek past current data");
     builder->position = position;
 }
 
 static void db_builder_ensure_space(db_builder builder, size_t bytes) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_builder_ensure_space: builder cannot be NULL");
     
     db_buffer buf = *(builder->buf_ptr);
+    db_internal* meta = db_meta(buf);
     size_t needed_size = builder->position + bytes;
     
-    if (needed_size > DB_HEADER(buf)->capacity) {
+    if (needed_size > meta->capacity) {
         // Need to grow the buffer
         db_reserve(builder->buf_ptr, needed_size);
+        buf = *(builder->buf_ptr); // Update after reallocation
+        meta = db_meta(buf); // Update meta pointer
     }
     
     // Update buffer size if we're writing past the current end
-    if (needed_size > DB_HEADER(*(builder->buf_ptr))->size) {
-        *DB_SIZE_PTR(*(builder->buf_ptr)) = needed_size;
+    if (needed_size > meta->size) {
+        meta->size = needed_size;
     }
 }
 
 DB_DEF db_builder db_write_uint8(db_builder builder, uint8_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_write_uint8: builder cannot be NULL");
     
     db_builder_ensure_space(builder, 1);
     
@@ -1285,7 +1317,7 @@ DB_DEF db_builder db_write_uint8(db_builder builder, uint8_t value) {
 }
 
 DB_DEF db_builder db_write_uint16_le(db_builder builder, uint16_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_write_uint16_le: builder cannot be NULL");
     
     db_builder_ensure_space(builder, 2);
     
@@ -1299,7 +1331,7 @@ DB_DEF db_builder db_write_uint16_le(db_builder builder, uint16_t value) {
 }
 
 DB_DEF db_builder db_write_uint16_be(db_builder builder, uint16_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "db_write_uint16_be: builder cannot be NULL");
     
     db_builder_ensure_space(builder, 2);
     
@@ -1313,7 +1345,7 @@ DB_DEF db_builder db_write_uint16_be(db_builder builder, uint16_t value) {
 }
 
 DB_DEF db_builder db_write_uint32_le(db_builder builder, uint32_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "builder cannot be NULL");
     
     db_builder_ensure_space(builder, 4);
     
@@ -1329,7 +1361,7 @@ DB_DEF db_builder db_write_uint32_le(db_builder builder, uint32_t value) {
 }
 
 DB_DEF db_builder db_write_uint32_be(db_builder builder, uint32_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "builder cannot be NULL");
     
     db_builder_ensure_space(builder, 4);
     
@@ -1345,7 +1377,7 @@ DB_DEF db_builder db_write_uint32_be(db_builder builder, uint32_t value) {
 }
 
 DB_DEF db_builder db_write_uint64_le(db_builder builder, uint64_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "builder cannot be NULL");
     
     db_builder_ensure_space(builder, 8);
     
@@ -1365,7 +1397,7 @@ DB_DEF db_builder db_write_uint64_le(db_builder builder, uint64_t value) {
 }
 
 DB_DEF db_builder db_write_uint64_be(db_builder builder, uint64_t value) {
-    DB_ASSERT(builder);
+    DB_ASSERT(builder && "builder cannot be NULL");
     
     db_builder_ensure_space(builder, 8);
     
@@ -1385,8 +1417,8 @@ DB_DEF db_builder db_write_uint64_be(db_builder builder, uint64_t value) {
 }
 
 DB_DEF db_builder db_write_bytes(db_builder builder, const void* data, size_t size) {
-    DB_ASSERT(builder);
-    DB_ASSERT(data || size == 0);
+    DB_ASSERT(builder && "db_write_bytes: builder cannot be NULL");
+    DB_ASSERT((data || size == 0) && "db_write_bytes: data cannot be NULL when size > 0");
     
     if (size == 0) return builder;
     
@@ -1400,8 +1432,8 @@ DB_DEF db_builder db_write_bytes(db_builder builder, const void* data, size_t si
 }
 
 DB_DEF db_builder db_write_cstring(db_builder builder, const char* str) {
-    DB_ASSERT(builder);
-    DB_ASSERT(str);
+    DB_ASSERT(builder && "db_write_cstring: builder cannot be NULL");
+    DB_ASSERT(str && "db_write_cstring: str cannot be NULL");
     
     size_t len = strlen(str);
     return db_write_bytes(builder, str, len);
@@ -1410,10 +1442,10 @@ DB_DEF db_builder db_write_cstring(db_builder builder, const char* str) {
 // Reader implementation
 
 DB_DEF db_reader db_reader_new(db_buffer buf) {
-    DB_ASSERT(buf);
+    DB_ASSERT(buf && "db_reader_new: buf cannot be NULL");
     
     struct db_reader_internal* reader = (struct db_reader_internal*)DB_MALLOC(sizeof(struct db_reader_internal));
-    DB_ASSERT(reader); // Malloc failure is a serious error
+    DB_ASSERT(reader && "db_reader_new: memory allocation failed");
     
     reader->buf = db_retain(buf);  // Keep a reference to the buffer
     reader->position = 0;
@@ -1422,7 +1454,7 @@ DB_DEF db_reader db_reader_new(db_buffer buf) {
 }
 
 DB_DEF void db_reader_free(db_reader* reader_ptr) {
-    DB_ASSERT(reader_ptr);
+    DB_ASSERT(reader_ptr && "db_reader_free: reader_ptr cannot be NULL");
     
     if (*reader_ptr) {
         struct db_reader_internal* reader = *reader_ptr;
@@ -1433,31 +1465,31 @@ DB_DEF void db_reader_free(db_reader* reader_ptr) {
 }
 
 DB_DEF size_t db_reader_position(db_reader reader) {
-    DB_ASSERT(reader);
+    DB_ASSERT(reader && "reader cannot be NULL");
     return reader->position;
 }
 
 DB_DEF size_t db_reader_remaining(db_reader reader) {
-    DB_ASSERT(reader);
-    size_t buffer_size = DB_HEADER(reader->buf)->size;
+    DB_ASSERT(reader && "reader cannot be NULL");
+    size_t buffer_size = db_meta(reader->buf)->size;
     return (reader->position < buffer_size) ? (buffer_size - reader->position) : 0;
 }
 
 DB_DEF bool db_reader_can_read(db_reader reader, size_t bytes) {
-    DB_ASSERT(reader);
+    DB_ASSERT(reader && "reader cannot be NULL");
     return db_reader_remaining(reader) >= bytes;
 }
 
 DB_DEF void db_reader_seek(db_reader reader, size_t position) {
-    DB_ASSERT(reader);
-    size_t buffer_size = DB_HEADER(reader->buf)->size;
-    DB_ASSERT(position <= buffer_size); // Can't seek past buffer end
+    DB_ASSERT(reader && "reader cannot be NULL");
+    size_t buffer_size = db_meta(reader->buf)->size;
+    DB_ASSERT(position <= buffer_size && "db_reader_seek: cannot seek past buffer end");
     reader->position = position;
 }
 
 DB_DEF uint8_t db_read_uint8(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 1)); // Must have 1 byte available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 1) && "db_read_uint8: insufficient data available");
     
     uint8_t value = *(uint8_t*)(reader->buf + reader->position);
     reader->position += 1;
@@ -1466,8 +1498,8 @@ DB_DEF uint8_t db_read_uint8(db_reader reader) {
 }
 
 DB_DEF uint16_t db_read_uint16_le(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 2)); // Must have 2 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 2) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint16_t value = (uint16_t)ptr[0] | ((uint16_t)ptr[1] << 8);
@@ -1477,8 +1509,8 @@ DB_DEF uint16_t db_read_uint16_le(db_reader reader) {
 }
 
 DB_DEF uint16_t db_read_uint16_be(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 2)); // Must have 2 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 2) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint16_t value = ((uint16_t)ptr[0] << 8) | (uint16_t)ptr[1];
@@ -1488,8 +1520,8 @@ DB_DEF uint16_t db_read_uint16_be(db_reader reader) {
 }
 
 DB_DEF uint32_t db_read_uint32_le(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 4)); // Must have 4 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 4) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint32_t value = (uint32_t)ptr[0] | 
@@ -1502,8 +1534,8 @@ DB_DEF uint32_t db_read_uint32_le(db_reader reader) {
 }
 
 DB_DEF uint32_t db_read_uint32_be(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 4)); // Must have 4 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 4) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint32_t value = ((uint32_t)ptr[0] << 24) | 
@@ -1516,8 +1548,8 @@ DB_DEF uint32_t db_read_uint32_be(db_reader reader) {
 }
 
 DB_DEF uint64_t db_read_uint64_le(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 8)); // Must have 8 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 8) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint64_t value = (uint64_t)ptr[0] | 
@@ -1534,8 +1566,8 @@ DB_DEF uint64_t db_read_uint64_le(db_reader reader) {
 }
 
 DB_DEF uint64_t db_read_uint64_be(db_reader reader) {
-    DB_ASSERT(reader);
-    DB_ASSERT(db_reader_can_read(reader, 8)); // Must have 8 bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT(db_reader_can_read(reader, 8) && "insufficient data available");
     
     const uint8_t* ptr = (const uint8_t*)(reader->buf + reader->position);
     uint64_t value = ((uint64_t)ptr[0] << 56) | 
@@ -1552,9 +1584,9 @@ DB_DEF uint64_t db_read_uint64_be(db_reader reader) {
 }
 
 DB_DEF void db_read_bytes(db_reader reader, void* data, size_t size) {
-    DB_ASSERT(reader);
-    DB_ASSERT(data || size == 0);
-    DB_ASSERT(db_reader_can_read(reader, size)); // Must have enough bytes available
+    DB_ASSERT(reader && "reader cannot be NULL");
+    DB_ASSERT((data || size == 0) && "db_read_bytes: data cannot be NULL when size > 0");
+    DB_ASSERT(db_reader_can_read(reader, size) && "db_read_bytes: insufficient data available");
     
     if (size > 0) {
         memcpy(data, reader->buf + reader->position, size);
