@@ -1,7 +1,7 @@
 /**
  * @file dynamic_buffer.h
  * @brief Reference-counted byte buffer library for efficient I/O operations
- * @version 0.1.0
+ * @version 0.2.1
  * @date August 2025
  *
  * Single header library for reference-counted byte buffers similar to libuv's buffer type.
@@ -1324,7 +1324,7 @@ DB_DEF db_builder db_builder_new(size_t initial_capacity) {
     // db_new asserts on allocation failure
     
     builder->refcount = DB_REFCOUNT_INIT(1);
-    builder->data = buf;
+    builder->data = buf;  // Take ownership of newly created buffer
     builder->capacity = initial_capacity;
     
     return builder;
@@ -1336,8 +1336,9 @@ DB_DEF db_builder db_builder_from_buffer(db_buffer buf) {
     struct db_builder_internal* builder = (struct db_builder_internal*)DB_MALLOC(sizeof(struct db_builder_internal));
     DB_ASSERT(builder && "db_builder_from_buffer: memory allocation failed");
     
+    // Make a copy of the buffer to preserve immutability
+    builder->data = db_new_with_data(buf, db_size(buf));
     builder->refcount = DB_REFCOUNT_INIT(1);
-    builder->data = db_retain(buf);
     builder->capacity = db_capacity(buf);
     
     return builder;
