@@ -76,7 +76,8 @@ void test_db_new_from_owned_data_takes_ownership(void) {
     TEST_ASSERT_EQUAL(20, db_capacity(buf));
     TEST_ASSERT_EQUAL_MEMORY("Owned data", buf, 10);
     
-    // Buffer now owns the data - don't free owned_data manually
+    // Free the original data since function copies it
+    DB_FREE(owned_data);
     db_release(&buf);
 }
 

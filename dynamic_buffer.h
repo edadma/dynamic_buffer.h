@@ -160,7 +160,7 @@ typedef char* db_buffer;
 /**
  * @brief Create a new empty buffer with specified capacity
  * @param capacity Initial capacity in bytes (0 for minimal allocation)
- * @return New buffer instance or NULL on allocation failure
+ * @return New buffer instance (asserts on allocation failure)
  */
 DB_DEF db_buffer db_new(size_t capacity);
 
@@ -168,7 +168,7 @@ DB_DEF db_buffer db_new(size_t capacity);
  * @brief Create a new buffer initialized with data (copies the data)
  * @param data Pointer to source data (can be NULL if size is 0)
  * @param size Number of bytes to copy
- * @return New buffer instance or NULL on allocation failure
+ * @return New buffer instance (asserts on allocation failure)
  * 
  * @par Example:
  * @code
@@ -182,12 +182,12 @@ DB_DEF db_buffer db_new(size_t capacity);
 DB_DEF db_buffer db_new_with_data(const void* data, size_t size);
 
 /**
- * @brief Create a new buffer that takes ownership of existing data
- * @param data Pointer to data (must be allocated with DB_MALLOC)
+ * @brief Create a new buffer by copying existing data
+ * @param data Pointer to data to copy
  * @param size Size of the data in bytes
  * @param capacity Total allocated capacity (must be >= size)
- * @return New buffer instance or NULL on failure
- * @warning The data pointer becomes owned by the buffer and must not be freed manually
+ * @return New buffer instance or NULL on invalid parameters (asserts on allocation failure)
+ * @note This function copies the data into the new buffer. You are responsible for freeing the original data if needed.
  */
 DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity);
 
@@ -289,7 +289,7 @@ DB_DEF db_buffer db_slice_to(db_buffer buf, size_t length);
  * @param buf Source buffer (must not be NULL)
  * @param data Data to append (can be NULL if size is 0)
  * @param size Number of bytes to append
- * @return New buffer with appended data, or NULL on failure
+ * @return New buffer with appended data (asserts on allocation failure)
  * @note Original buffer remains unchanged (immutable operation)
  * 
  * @par Example:
@@ -319,7 +319,7 @@ DB_DEF db_buffer db_append(db_buffer buf, const void* data, size_t size);
  * @brief Concatenate two buffers into a new buffer
  * @param buf1 First buffer (can be NULL)
  * @param buf2 Second buffer (can be NULL)
- * @return New buffer containing concatenated data, or NULL on failure
+ * @return New buffer containing concatenated data (asserts on allocation failure)
  */
 DB_DEF db_buffer db_concat(db_buffer buf1, db_buffer buf2);
 
@@ -327,7 +327,7 @@ DB_DEF db_buffer db_concat(db_buffer buf1, db_buffer buf2);
  * @brief Concatenate multiple buffers into a new buffer
  * @param buffers Array of buffer pointers
  * @param count Number of buffers in array
- * @return New buffer containing concatenated data, or NULL on failure
+ * @return New buffer containing concatenated data (asserts on allocation failure)
  */
 DB_DEF db_buffer db_concat_many(db_buffer* buffers, size_t count);
 
@@ -384,7 +384,7 @@ DB_DEF ssize_t db_write_fd(db_buffer buf, int fd);
 /**
  * @brief Read entire file into a new buffer
  * @param filename Path to file to read
- * @return New buffer containing file contents, or NULL on failure
+ * @return New buffer containing file contents, or NULL if file cannot be read
  */
 DB_DEF db_buffer db_read_file(const char* filename);
 
@@ -408,7 +408,7 @@ DB_DEF bool db_write_file(db_buffer buf, const char* filename);
  * @brief Create a hexadecimal representation of buffer contents
  * @param buf Buffer to convert (must not be NULL)
  * @param uppercase Use uppercase hex digits if true
- * @return New buffer containing hex string, or NULL on failure
+ * @return New buffer containing hex string (asserts on allocation failure)
  */
 DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase);
 
@@ -416,7 +416,7 @@ DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase);
  * @brief Create buffer from hexadecimal string
  * @param hex_string Hexadecimal string (must be valid hex)
  * @param length Length of hex string
- * @return New buffer containing decoded bytes, or NULL on failure
+ * @return New buffer containing decoded bytes, or NULL on invalid hex string (asserts on allocation failure)
  */
 DB_DEF db_buffer db_from_hex(const char* hex_string, size_t length);
 
@@ -738,7 +738,7 @@ static db_buffer db_alloc(size_t capacity) {
     }
     
     void* block = DB_MALLOC(total_size);
-    if (!block) return NULL;
+    DB_ASSERT(block && "db_alloc: memory allocation failed");
     
     // Initialize metadata
     db_internal* meta = (db_internal*)block;
@@ -772,7 +772,7 @@ DB_DEF db_buffer db_new_with_data(const void* data, size_t size) {
     DB_ASSERT((data || size == 0) && "db_new_with_data: data cannot be NULL when size > 0");
     
     db_buffer buf = db_alloc(size);
-    if (!buf) return NULL;
+    // db_alloc now asserts on allocation failure
     
     if (size > 0) {
         memcpy(buf, data, size);
@@ -789,18 +789,12 @@ DB_DEF db_buffer db_new_from_owned_data(void* data, size_t size, size_t capacity
     // We can't use the negative offset trick here since we don't control the data allocation
     // Instead, we'll copy the data to maintain design consistency
     db_buffer buf = db_alloc(capacity);
-    if (!buf) {
-        DB_FREE(data); // Free the data since we're taking ownership
-        return NULL;
-    }
+    // db_alloc now asserts on allocation failure
     
     if (size > 0) {
         memcpy(buf, data, size);
         db_meta(buf)->size = size;
     }
-    
-    // Free the original data since we copied it
-    DB_FREE(data);
     
     return buf;
 }
@@ -855,7 +849,7 @@ DB_DEF db_buffer db_slice(db_buffer buf, size_t offset, size_t length) {
     
     // Create an independent copy of the slice data
     db_buffer slice = db_alloc(length);
-    if (!slice) return NULL;
+    // db_alloc now asserts on allocation failure
     
     // Copy the slice data directly from the source buffer
     if (length > 0) {
@@ -892,7 +886,7 @@ DB_DEF db_buffer db_append(db_buffer buf, const void* data, size_t size) {
     size_t old_size = db_meta(buf)->size;
     size_t new_size = old_size + size;
     db_buffer result = db_new(new_size);
-    if (!result) return NULL;
+    // db_new now asserts on allocation failure
     
     // Copy original buffer
     if (old_size > 0) {
@@ -924,7 +918,7 @@ static int db_internal_ensure_unique(db_buffer* builder_data) {
     // Need to create our own copy
     size_t current_size = db_size(*builder_data);
     db_buffer new_buf = db_new_with_data(*builder_data, current_size);
-    if (!new_buf) return -1;
+    // db_new_with_data now asserts on allocation failure
     
     db_release(builder_data);
     *builder_data = new_buf;
@@ -952,19 +946,21 @@ static int db_internal_ensure_capacity(db_buffer* builder_data, size_t* builder_
         new_capacity *= 2; // Double the capacity
     }
     
-    // Create new buffer with larger capacity
-    size_t current_size = db_size(*builder_data);
-    db_buffer new_buf = db_new(new_capacity);
-    if (!new_buf) return -1;
+    // Use realloc for efficient buffer growth
+    db_internal* meta = db_meta(*builder_data);
     
-    // Copy existing data
-    if (current_size > 0) {
-        memcpy(new_buf, *builder_data, current_size);
-        db_meta(new_buf)->size = current_size;
-    }
+    // Calculate new block size (metadata + data)
+    size_t new_block_size = sizeof(db_internal) + new_capacity;
     
-    db_release(builder_data);
-    *builder_data = new_buf;
+    // Realloc the entire block (metadata + data)
+    db_internal* new_meta = (db_internal*)DB_REALLOC(meta, new_block_size);
+    DB_ASSERT(new_meta && "db_internal_ensure_capacity: memory reallocation failed");
+    
+    // Update capacity (size remains the same)
+    new_meta->capacity = new_capacity;
+    
+    // Update the buffer pointer to point to data portion
+    *builder_data = (db_buffer)((char*)new_meta + sizeof(db_internal));
     *builder_capacity = new_capacity;
     return 0;
 }
@@ -1009,7 +1005,7 @@ DB_DEF db_buffer db_concat(db_buffer buf1, db_buffer buf2) {
     if (total_size == 0) return db_new(0);
     
     db_buffer result = db_new(total_size);
-    if (!result) return NULL;
+    // db_new now asserts on allocation failure
     
     if (size1 > 0) {
         memcpy(result, buf1, size1);
@@ -1035,7 +1031,7 @@ DB_DEF db_buffer db_concat_many(db_buffer* buffers, size_t count) {
     }
     
     db_buffer result = db_new(total_size);
-    if (!result) return NULL;
+    // db_new now asserts on allocation failure
     
     size_t offset = 0;
     for (size_t i = 0; i < count; i++) {
@@ -1103,7 +1099,7 @@ DB_DEF ssize_t db_read_fd(db_buffer* buf_ptr, int fd, size_t max_bytes) {
     // Read data into a temporary buffer first
     size_t read_size = max_bytes == 0 ? 4096 : max_bytes;
     char* temp_buffer = (char*)DB_MALLOC(read_size);
-    if (!temp_buffer) return -1;
+    DB_ASSERT(temp_buffer && "db_read_fd: memory allocation failed");
     
     ssize_t bytes_read = db_read(fd, temp_buffer, read_size);
     if (bytes_read > 0) {
@@ -1186,7 +1182,7 @@ DB_DEF db_buffer db_to_hex(db_buffer buf, bool uppercase) {
     
     size_t hex_size = size * 2;
     db_buffer hex_buf = db_new(hex_size);
-    if (!hex_buf) return NULL;
+    // db_new now asserts on allocation failure
     
     const char* hex_chars = uppercase ? "0123456789ABCDEF" : "0123456789abcdef";
     const uint8_t* data = (const uint8_t*)buf;
@@ -1213,7 +1209,7 @@ DB_DEF db_buffer db_from_hex(const char* hex_string, size_t length) {
     
     size_t byte_length = length / 2;
     db_buffer buf = db_new(byte_length);
-    if (!buf) return NULL;
+    // db_new now asserts on allocation failure
     
     uint8_t* data = (uint8_t*)buf;
     
