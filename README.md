@@ -1,6 +1,6 @@
 # dynamic_buffer.h
 
-[![Version](https://img.shields.io/badge/version-v0.1.0-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
+[![Version](https://img.shields.io/badge/version-v0.1.1-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
 [![Language](https://img.shields.io/badge/language-C11-blue.svg)](https://en.cppreference.com/w/c/11)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Unlicense-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20MCU-lightgrey.svg)](#building)
@@ -338,7 +338,14 @@ All functions that can fail are documented with their failure conditions.
 
 ## Version History
 
-### v0.1.0 (Current)
+### v0.1.1 (Current)
+- **Memory Safety**: All allocation failures now assert instead of returning NULL
+- **Performance**: Builder uses DB_REALLOC for efficient capacity growth
+- **Bug Fixes**: Fixed db_new_from_owned_data memory ownership semantics
+- **Documentation**: Updated Doxygen comments to reflect assertion behavior
+- **Compatibility**: Maintains 46/46 test coverage
+
+### v0.1.0
 - **Initial Release**: Complete immutable buffer system with reference counting
 - **Builder Pattern**: Efficient mutable construction with `db_builder` API
 - **Reader Pattern**: Type-safe parsing with cursor-based access  
