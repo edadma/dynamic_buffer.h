@@ -2,6 +2,8 @@
 #include "dynamic_buffer.h"
 #include "unity.h"
 #include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 void setUp(void) {
     // Set up function called before each test
@@ -185,72 +187,58 @@ void test_db_slice_to_creates_prefix(void) {
 }
 
 // Test buffer modification
-void test_db_resize_increases_size(void) {
-    db_buffer buf = db_new(10);
-    TEST_ASSERT_TRUE(db_resize(&buf, 20));
-    TEST_ASSERT_EQUAL(20, db_size(buf));
-    TEST_ASSERT_TRUE(db_capacity(buf) >= 20);
-    db_release(&buf);
-}
+// Mutable operation tests removed - buffers are now immutable
 
-void test_db_resize_decreases_size(void) {
-    db_buffer buf = db_new_with_data("Hello, World!", 13);
-    TEST_ASSERT_TRUE(db_resize(&buf, 5));
-    TEST_ASSERT_EQUAL(5, db_size(buf));
-    db_release(&buf);
-}
-
-void test_db_resize_fails_on_shared_buffer(void) {
-    db_buffer buf = db_new(10);
-    db_buffer buf2 = db_retain(buf);
+void test_db_append_creates_new_buffer(void) {
+    db_buffer buf1 = db_new_with_data("Hello", 5);
+    db_buffer buf2 = db_append(buf1, ", World!", 8);
     
-    TEST_ASSERT_FALSE(db_resize(&buf, 20));
+    TEST_ASSERT_NOT_NULL(buf2);
+    TEST_ASSERT_EQUAL(13, db_size(buf2));
+    TEST_ASSERT_EQUAL_MEMORY("Hello, World!", buf2, 13);
     
-    db_release(&buf);
+    // Original buffer unchanged
+    TEST_ASSERT_EQUAL(5, db_size(buf1));
+    TEST_ASSERT_EQUAL_MEMORY("Hello", buf1, 5);
+    
+    db_release(&buf1);
     db_release(&buf2);
 }
 
-void test_db_reserve_ensures_capacity(void) {
-    db_buffer buf = db_new(10);
-    TEST_ASSERT_TRUE(db_reserve(&buf, 100));
-    TEST_ASSERT_TRUE(db_capacity(buf) >= 100);
-    db_release(&buf);
-}
-
-void test_db_append_adds_data(void) {
-    db_buffer buf = db_new_with_data("Hello", 5);
-    TEST_ASSERT_TRUE(db_append(&buf, ", World!", 8));
+void test_db_append_handles_empty_data_immutable(void) {
+    db_buffer buf1 = db_new_with_data("Hello", 5);
+    db_buffer buf2 = db_append(buf1, NULL, 0);
     
-    TEST_ASSERT_EQUAL(13, db_size(buf));
-    TEST_ASSERT_EQUAL_MEMORY("Hello, World!", buf, 13);
+    // Should return retained original buffer when appending nothing
+    TEST_ASSERT_EQUAL(buf1, buf2);
+    TEST_ASSERT_EQUAL(5, db_size(buf2));
+    TEST_ASSERT_EQUAL_MEMORY("Hello", buf2, 5);
     
-    db_release(&buf);
-}
-
-void test_db_append_handles_empty_data(void) {
-    db_buffer buf = db_new_with_data("Hello", 5);
-    TEST_ASSERT_TRUE(db_append(&buf, NULL, 0));
-    TEST_ASSERT_EQUAL(5, db_size(buf));
-    db_release(&buf);
-}
-
-void test_db_append_fails_on_shared_buffer(void) {
-    db_buffer buf = db_new_with_data("Hello", 5);
-    db_buffer buf2 = db_retain(buf);
-    
-    TEST_ASSERT_FALSE(db_append(&buf, " World", 6));
-    
-    db_release(&buf);
+    db_release(&buf1);
     db_release(&buf2);
 }
 
-void test_db_clear_empties_buffer(void) {
-    db_buffer buf = db_new_with_data("Hello", 5);
-    TEST_ASSERT_TRUE(db_clear(buf));
-    TEST_ASSERT_EQUAL(0, db_size(buf));
-    TEST_ASSERT_TRUE(db_is_empty(buf));
-    db_release(&buf);
+
+void test_db_append_works_with_shared_buffer(void) {
+    db_buffer buf1 = db_new_with_data("Hello", 5);
+    db_buffer buf2 = db_retain(buf1);  // Share the buffer
+    
+    // Append should still work (creates new buffer)
+    db_buffer buf3 = db_append(buf1, " World", 6);
+    TEST_ASSERT_NOT_NULL(buf3);
+    TEST_ASSERT_EQUAL(11, db_size(buf3));
+    TEST_ASSERT_EQUAL_MEMORY("Hello World", buf3, 11);
+    
+    // Original buffers unchanged
+    TEST_ASSERT_EQUAL(5, db_size(buf1));
+    TEST_ASSERT_EQUAL(5, db_size(buf2));
+    
+    db_release(&buf1);
+    db_release(&buf2);
+    db_release(&buf3);
 }
+
+// test_db_clear_empties_buffer removed - db_clear no longer exists (buffers are immutable)
 
 // Test concatenation
 void test_db_concat_joins_buffers(void) {
@@ -364,38 +352,18 @@ void test_db_debug_print_doesnt_crash(void) {
 }
 
 // Test edge cases and error conditions
-void test_empty_buffer_operations(void) {
-    db_buffer buf = db_new(0);
-    
-    TEST_ASSERT_TRUE(db_is_empty(buf));
-    TEST_ASSERT_EQUAL(0, db_size(buf));
-    TEST_ASSERT_NOT_NULL(buf);  // Should return valid pointer even for empty buffer
-    
-    // Operations on empty buffer
-    TEST_ASSERT_TRUE(db_append(&buf, "Hello", 5));
-    TEST_ASSERT_FALSE(db_is_empty(buf));
-    TEST_ASSERT_EQUAL(5, db_size(buf));
-    
-    TEST_ASSERT_TRUE(db_clear(buf));
-    TEST_ASSERT_TRUE(db_is_empty(buf));
-    
-    db_release(&buf);
-}
 
 void test_large_buffer_operations(void) {
     const size_t large_size = 1024 * 1024;  // 1MB
-    db_buffer buf = db_new(large_size);
     
-    TEST_ASSERT_NOT_NULL(buf);
-    TEST_ASSERT_EQUAL(large_size, db_capacity(buf));
-    
-    // Fill with pattern
-    char* data = (char*)buf;
+    // Create pattern data
+    char* pattern_data = malloc(large_size);
     for (size_t i = 0; i < large_size; i++) {
-        data[i] = (char)(i % 256);
+        pattern_data[i] = (char)(i % 256);
     }
     
-    TEST_ASSERT_TRUE(db_resize(&buf, large_size));
+    db_buffer buf = db_new_with_data(pattern_data, large_size);
+    TEST_ASSERT_NOT_NULL(buf);
     TEST_ASSERT_EQUAL(large_size, db_size(buf));
     
     // Verify pattern
@@ -404,6 +372,7 @@ void test_large_buffer_operations(void) {
         TEST_ASSERT_EQUAL((char)(i % 256), const_data[i]);
     }
     
+    free(pattern_data);
     db_release(&buf);
 }
 
@@ -411,13 +380,14 @@ void test_large_buffer_operations(void) {
 
 void test_builder_basic_operations(void) {
     db_builder builder = db_builder_new(64);
-    TEST_ASSERT_NOT_NULL(builder);
+    TEST_ASSERT_NOT_NULL(builder.data);
+    TEST_ASSERT_EQUAL(64, db_builder_capacity(&builder));
     
-    TEST_ASSERT_EQUAL(0, db_builder_position(builder));
+    TEST_ASSERT_EQUAL(0, db_builder_size(&builder));
     
     db_buffer buf = db_builder_finish(&builder);
     TEST_ASSERT_NOT_NULL(buf);
-    TEST_ASSERT_NULL(builder);  // Should be set to NULL
+    TEST_ASSERT_NULL(builder.data);  // Should be set to NULL after finish
     
     TEST_ASSERT_EQUAL(0, db_size(buf));
     
@@ -427,12 +397,12 @@ void test_builder_basic_operations(void) {
 void test_builder_write_primitives(void) {
     db_builder builder = db_builder_new(64);
     
-    builder = db_write_uint8(builder, 0x42);
-    builder = db_write_uint16_le(builder, 0x1234);
-    builder = db_write_uint32_le(builder, 0x12345678);
-    builder = db_write_uint64_le(builder, 0x123456789ABCDEF0ULL);
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(&builder, 0x42));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(&builder, 0x12345678));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_le(&builder, 0x123456789ABCDEF0ULL));
     
-    TEST_ASSERT_EQUAL(1 + 2 + 4 + 8, db_builder_position(builder));
+    TEST_ASSERT_EQUAL(1 + 2 + 4 + 8, db_builder_size(&builder));
     
     db_buffer buf = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(15, db_size(buf));
@@ -449,8 +419,8 @@ void test_builder_write_endianness(void) {
     db_builder builder = db_builder_new(64);
     
     // Write same value in both endiannesses
-    builder = db_write_uint16_le(builder, 0x1234);
-    builder = db_write_uint16_be(builder, 0x1234);
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_be(&builder, 0x1234));
     
     db_buffer buf = db_builder_finish(&builder);
     const uint8_t* data = (const uint8_t*)buf;
@@ -469,37 +439,33 @@ void test_builder_write_endianness(void) {
 void test_builder_from_buffer(void) {
     db_buffer buf = db_new_with_data("Hello", 5);
     
-    db_builder builder = db_builder_from_buffer(&buf);
-    TEST_ASSERT_EQUAL(5, db_builder_position(builder));
+    db_builder builder = db_builder_from_buffer(buf);
+    TEST_ASSERT_EQUAL(5, db_builder_size(&builder));
     
-    builder = db_write_cstring(builder, " World");
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, " World"));
     
     db_buffer result = db_builder_finish(&builder);
     TEST_ASSERT_EQUAL(11, db_size(result));
     TEST_ASSERT_EQUAL_MEMORY("Hello World", result, 11);
     
-    // Original buf should still be valid and same as result
-    TEST_ASSERT_EQUAL(result, buf);
-    
     db_release(&buf);
+    db_release(&result);
 }
 
-void test_builder_seek_operations(void) {
+void test_builder_clear_operations(void) {
     db_builder builder = db_builder_new(64);
     
-    builder = db_write_uint32_le(builder, 0x12345678);
-    TEST_ASSERT_EQUAL(4, db_builder_position(builder));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_le(&builder, 0x12345678));
+    TEST_ASSERT_EQUAL(4, db_builder_size(&builder));
     
-    db_builder_seek(builder, 1);  // Seek to position 1
-    builder = db_write_uint16_le(builder, 0xABCD);
+    db_builder_clear(&builder);
+    TEST_ASSERT_EQUAL(0, db_builder_size(&builder));
+    
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, "Test"));
+    TEST_ASSERT_EQUAL(4, db_builder_size(&builder));
     
     db_buffer buf = db_builder_finish(&builder);
-    const uint8_t* data = (const uint8_t*)buf;
-    
-    TEST_ASSERT_EQUAL(0x78, data[0]);  // Original first byte
-    TEST_ASSERT_EQUAL(0xCD, data[1]);  // Overwritten
-    TEST_ASSERT_EQUAL(0xAB, data[2]);  // Overwritten
-    TEST_ASSERT_EQUAL(0x12, data[3]);  // Original last byte
+    TEST_ASSERT_EQUAL_MEMORY("Test", buf, 4);
     
     db_release(&buf);
 }
@@ -602,10 +568,10 @@ void test_reader_seek_operations(void) {
 void test_builder_reader_roundtrip(void) {
     // Build a complex buffer
     db_builder builder = db_builder_new(64);
-    builder = db_write_uint8(builder, 0x42);
-    builder = db_write_uint16_le(builder, 0x1234);
-    builder = db_write_uint32_be(builder, 0x12345678);
-    builder = db_write_cstring(builder, "Test");
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint8(&builder, 0x42));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint16_le(&builder, 0x1234));
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint32_be(&builder, 0x12345678));
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, "Test"));
     
     db_buffer buf = db_builder_finish(&builder);
     
@@ -624,6 +590,199 @@ void test_builder_reader_roundtrip(void) {
     
     db_reader_free(&reader);
     db_release(&buf);
+}
+
+// Missing core function tests
+void test_db_core_functions(void) {
+    db_buffer buf = db_new_with_data("Hello", 5);
+    
+    TEST_ASSERT_EQUAL(5, db_size(buf));
+    TEST_ASSERT(db_capacity(buf) >= 5);
+    TEST_ASSERT_FALSE(db_is_empty(buf));
+    TEST_ASSERT_EQUAL(1, db_refcount(buf));
+    
+    db_buffer shared = db_retain(buf);
+    TEST_ASSERT_EQUAL(2, db_refcount(buf));
+    TEST_ASSERT_EQUAL(2, db_refcount(shared));
+    
+    db_release(&shared);
+    TEST_ASSERT_EQUAL(1, db_refcount(buf));
+    
+    db_release(&buf);
+}
+
+void test_db_empty_buffer_core_functions(void) {
+    db_buffer buf = db_new(0);
+    
+    TEST_ASSERT_EQUAL(0, db_size(buf));
+    TEST_ASSERT_EQUAL(0, db_capacity(buf));
+    TEST_ASSERT_TRUE(db_is_empty(buf));
+    TEST_ASSERT_EQUAL(1, db_refcount(buf));
+    
+    db_release(&buf);
+}
+
+// Missing builder function tests
+void test_builder_append_functions(void) {
+    db_builder builder = db_builder_new(64);
+    
+    // Test db_builder_append with raw data
+    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, "Hello", 5));
+    TEST_ASSERT_EQUAL(5, db_builder_size(&builder));
+    
+    // Test db_builder_append_cstring  
+    TEST_ASSERT_EQUAL(0, db_builder_append_cstring(&builder, " World"));
+    TEST_ASSERT_EQUAL(11, db_builder_size(&builder));
+    
+    // Test db_builder_append_buffer
+    db_buffer extra = db_new_with_data("!", 1);
+    TEST_ASSERT_EQUAL(0, db_builder_append_buffer(&builder, extra));
+    TEST_ASSERT_EQUAL(12, db_builder_size(&builder));
+    
+    db_buffer result = db_builder_finish(&builder);
+    TEST_ASSERT_EQUAL(12, db_size(result));
+    TEST_ASSERT_EQUAL_MEMORY("Hello World!", result, 12);
+    
+    db_release(&extra);
+    db_release(&result);
+}
+
+// Missing reader function tests  
+void test_reader_missing_functions(void) {
+    // Create buffer with big-endian uint64
+    db_builder builder = db_builder_new(32);
+    TEST_ASSERT_EQUAL(0, db_builder_append_uint64_be(&builder, 0x123456789ABCDEF0ULL));
+    
+    // Add some bytes for db_read_bytes test
+    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, "TestData", 8));
+    
+    db_buffer buf = db_builder_finish(&builder);
+    db_reader reader = db_reader_new(buf);
+    
+    // Test db_read_uint64_be
+    TEST_ASSERT_EQUAL(0x123456789ABCDEF0ULL, db_read_uint64_be(reader));
+    
+    // Test db_read_bytes
+    char data[9] = {0};
+    db_read_bytes(reader, data, 8);
+    TEST_ASSERT_EQUAL_STRING("TestData", data);
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+// Edge case tests for NULL parameters
+void test_null_parameter_handling(void) {
+    // Test debug print with NULL (these should not crash)
+    db_debug_print(NULL, "null_test");
+    db_debug_print(NULL, NULL);
+    
+    // Test db_new_with_data with NULL data but 0 size (should work)
+    db_buffer buf = db_new_with_data(NULL, 0);
+    TEST_ASSERT_NOT_NULL(buf);
+    TEST_ASSERT_TRUE(db_is_empty(buf));
+    db_release(&buf);
+}
+
+// Edge case tests for invalid parameters
+void test_invalid_parameter_handling(void) {
+    db_buffer buf = db_new_with_data("Hello", 5);
+    
+    // Test slice with invalid bounds
+    TEST_ASSERT_NULL(db_slice(buf, 10, 5));  // offset beyond buffer
+    TEST_ASSERT_NULL(db_slice(buf, 2, 10));  // length extends beyond buffer
+    TEST_ASSERT_NULL(db_slice(buf, 5, 1));   // offset at end, non-zero length
+    
+    // Test slice_from with invalid offset
+    TEST_ASSERT_NULL(db_slice_from(buf, 10));  // offset beyond buffer
+    
+    // Test slice_to with invalid length  
+    TEST_ASSERT_NULL(db_slice_to(buf, 10));  // length beyond buffer
+    
+    db_release(&buf);
+}
+
+// Reader edge case tests
+void test_reader_edge_cases(void) {
+    db_buffer buf = db_new_with_data("Test", 4);
+    db_reader reader = db_reader_new(buf);
+    
+    // Test bounds checking
+    TEST_ASSERT_TRUE(db_reader_can_read(reader, 4));
+    TEST_ASSERT_FALSE(db_reader_can_read(reader, 5));
+    
+    // Read all data
+    char data[5] = {0};
+    db_read_bytes(reader, data, 4);
+    
+    // Try to read beyond end (should handle gracefully)
+    TEST_ASSERT_FALSE(db_reader_can_read(reader, 1));
+    TEST_ASSERT_EQUAL(0, db_reader_remaining(reader));
+    
+    // Test seeking to valid positions
+    db_reader_seek(reader, 2);
+    TEST_ASSERT_EQUAL(2, db_reader_position(reader));
+    
+    db_reader_seek(reader, 4);  // Seek to end
+    TEST_ASSERT_EQUAL(4, db_reader_position(reader));
+    
+    db_reader_free(&reader);
+    db_release(&buf);
+}
+
+// Builder capacity growth tests
+void test_builder_capacity_growth(void) {
+    db_builder builder = db_builder_new(8);  // Small initial capacity
+    
+    TEST_ASSERT_EQUAL(8, db_builder_capacity(&builder));
+    
+    // Fill beyond initial capacity to trigger growth
+    const char* large_data = "This is much longer than 8 bytes and should trigger capacity growth";
+    TEST_ASSERT_EQUAL(0, db_builder_append(&builder, large_data, strlen(large_data)));
+    
+    TEST_ASSERT(db_builder_capacity(&builder) >= strlen(large_data));
+    TEST_ASSERT_EQUAL(strlen(large_data), db_builder_size(&builder));
+    
+    db_buffer result = db_builder_finish(&builder);
+    TEST_ASSERT_EQUAL(strlen(large_data), db_size(result));
+    TEST_ASSERT_EQUAL_MEMORY(large_data, result, strlen(large_data));
+    
+    db_release(&result);
+}
+
+// I/O function tests
+void test_file_io_operations(void) {
+    const char* test_filename = "/tmp/db_test_file.bin";
+    const char* test_data = "Hello, File I/O!";
+    
+    // Create buffer and write to file
+    db_buffer write_buf = db_new_with_data(test_data, strlen(test_data));
+    bool write_result = db_write_file(write_buf, test_filename);
+    TEST_ASSERT_TRUE(write_result);
+    
+    // Read back from file
+    db_buffer read_buf = db_read_file(test_filename);
+    TEST_ASSERT_NOT_NULL(read_buf);
+    TEST_ASSERT_EQUAL(strlen(test_data), db_size(read_buf));
+    TEST_ASSERT_EQUAL_MEMORY(test_data, read_buf, strlen(test_data));
+    
+    // Clean up
+    db_release(&write_buf);
+    db_release(&read_buf);
+    unlink(test_filename);
+}
+
+void test_file_io_nonexistent_file(void) {
+    // Test reading non-existent file
+    db_buffer buf = db_read_file("/tmp/nonexistent_file_12345.bin");
+    TEST_ASSERT_NULL(buf);
+    
+    // Test writing to invalid path (should fail gracefully)
+    db_buffer test_buf = db_new_with_data("test", 4);
+    bool result = db_write_file(test_buf, "/root/invalid_path/file.bin");
+    TEST_ASSERT_FALSE(result);
+    
+    db_release(&test_buf);
 }
 
 int main(void) {
@@ -646,6 +805,10 @@ int main(void) {
     RUN_TEST(test_db_data_returns_valid_pointer);
     RUN_TEST(test_db_mutable_data_allows_modification);
     
+    // Core function tests
+    RUN_TEST(test_db_core_functions);
+    RUN_TEST(test_db_empty_buffer_core_functions);
+    
     // Slicing tests
     RUN_TEST(test_db_slice_creates_copy);
     RUN_TEST(test_db_slice_handles_invalid_bounds);
@@ -653,14 +816,8 @@ int main(void) {
     RUN_TEST(test_db_slice_to_creates_prefix);
     
     // Modification tests
-    RUN_TEST(test_db_resize_increases_size);
-    RUN_TEST(test_db_resize_decreases_size);
-    RUN_TEST(test_db_resize_fails_on_shared_buffer);
-    RUN_TEST(test_db_reserve_ensures_capacity);
-    RUN_TEST(test_db_append_adds_data);
-    RUN_TEST(test_db_append_handles_empty_data);
-    RUN_TEST(test_db_append_fails_on_shared_buffer);
-    RUN_TEST(test_db_clear_empties_buffer);
+    RUN_TEST(test_db_append_creates_new_buffer);
+    RUN_TEST(test_db_append_handles_empty_data_immutable);
     
     // Concatenation tests
     RUN_TEST(test_db_concat_joins_buffers);
@@ -678,12 +835,18 @@ int main(void) {
     RUN_TEST(test_db_from_hex_handles_invalid_input);
     RUN_TEST(test_db_debug_print_doesnt_crash);
     
+    // I/O function tests
+    RUN_TEST(test_file_io_operations);
+    RUN_TEST(test_file_io_nonexistent_file);
+    
     // Builder API tests
     RUN_TEST(test_builder_basic_operations);
     RUN_TEST(test_builder_write_primitives);
     RUN_TEST(test_builder_write_endianness);
     RUN_TEST(test_builder_from_buffer);
-    RUN_TEST(test_builder_seek_operations);
+    RUN_TEST(test_builder_clear_operations);
+    RUN_TEST(test_builder_append_functions);
+    RUN_TEST(test_builder_capacity_growth);
     
     // Reader API tests
     RUN_TEST(test_reader_basic_operations);
@@ -691,13 +854,16 @@ int main(void) {
     RUN_TEST(test_reader_read_endianness);
     RUN_TEST(test_reader_bounds_checking);
     RUN_TEST(test_reader_seek_operations);
+    RUN_TEST(test_reader_missing_functions);
+    RUN_TEST(test_reader_edge_cases);
     
     // Builder + Reader integration tests
     RUN_TEST(test_builder_reader_roundtrip);
     
     // Edge case tests
-    RUN_TEST(test_empty_buffer_operations);
     RUN_TEST(test_large_buffer_operations);
+    RUN_TEST(test_null_parameter_handling);
+    RUN_TEST(test_invalid_parameter_handling);
     
     return UNITY_END();
 }

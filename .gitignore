@@ -20,7 +20,7 @@ _deps/
 *.exe
 *.out
 *.app
-bit
+tests
 
 # Object files
 *.o
@@ -48,6 +48,10 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Documentation (generated)
+docs/
+doxygen_warnings.txt
 
 # Log files
 *.log
