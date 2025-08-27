@@ -343,7 +343,19 @@ All functions that can fail are documented with their failure conditions.
 
 ## Version History
 
-### v0.1.1 (Current)
+### v0.2.1 (Current)
+- **Bug Fixes**: Fixed db_builder_from_buffer to preserve buffer immutability by making immediate copy
+- **Compatibility**: All 51 tests pass with corrected immutability semantics
+
+### v0.2.0
+- **Reference Counting**: Add reference counting to builders and readers  
+- **API Changes**: Convert db_builder from struct to opaque pointer type
+- **New Functions**: Add db_builder_retain(), db_builder_release(), db_reader_retain(), db_reader_release()
+- **Error Handling**: Implement assertion-based error handling for NULL inputs
+- **Testing**: Update comprehensive test suite with reference counting tests
+- **Documentation**: Update API documentation and examples
+
+### v0.1.1
 - **Memory Safety**: All allocation failures now assert instead of returning NULL
 - **Performance**: Builder uses DB_REALLOC for efficient capacity growth
 - **Bug Fixes**: Fixed db_new_from_owned_data memory ownership semantics
