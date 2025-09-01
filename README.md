@@ -1,6 +1,6 @@
 # dynamic_buffer.h
 
-[![Version](https://img.shields.io/badge/version-v0.2.1-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
+[![Version](https://img.shields.io/badge/version-v0.2.2-blue.svg)](https://github.com/your-username/dynamic_buffer.h/releases)
 [![Language](https://img.shields.io/badge/language-C11-blue.svg)](https://en.cppreference.com/w/c/11)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Unlicense-green.svg)](#license)
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20MCU-lightgrey.svg)](#building)
@@ -343,7 +343,10 @@ All functions that can fail are documented with their failure conditions.
 
 ## Version History
 
-### v0.2.1 (Current)
+### v0.2.2 (Current)
+- **Maintenance**: Version update for patch release
+
+### v0.2.1
 - **Bug Fixes**: Fixed db_builder_from_buffer to preserve buffer immutability by making immediate copy
 - **Compatibility**: All 51 tests pass with corrected immutability semantics
 

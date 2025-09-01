@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 project(dynamic_buffer 
-    VERSION 0.1.0
+    VERSION 0.2.2
     DESCRIPTION "Reference-counted byte buffer library for efficient I/O operations"
     LANGUAGES C)
 
